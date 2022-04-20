@@ -1,0 +1,105 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes'?>
+<!--
+  ~   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
+  ~
+  ~   This program is free software: you can redistribute it and/or modify
+  ~   it under the terms of the GNU Affero General Public License as published by
+  ~   the Free Software Foundation, either version 3 of the License, or
+  ~   (at your option) any later version.
+  ~
+  ~   This program is distributed in the hope that it will be useful,
+  ~   but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ~   GNU Affero General Public License for more details.
+  ~
+  ~   You should have received a copy of the GNU Affero General Public License
+  ~   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  ~
+  ~   This file is part of LA Referencia software platform LRHarvester v4.x
+  ~   For any further information please contact Lautaro Matas <lmatas@gmail.com>
+  -->
+
+<entity-relation-data source="LATTES" record="4687858846001290" lastUpdate="2020-10-02 18:48:05.123" >
+	<entities>
+		<entity type="Person" ref="Person1">
+			<semanticIdentifier>lattes::4687858846001290</semanticIdentifier>
+			<semanticIdentifier>orcid::0000-0001-5057-9936</semanticIdentifier>
+			<!--identifiers -->
+			<field name="identifier.lattes" value="4687858846001290" />
+			<field name="identifier.orcid" value="https://orcid.org/0000-0001-5057-9936" />
+		</entity>
+
+		<entity type="Publication" ref="Publication1" >
+			<semanticIdentifier>dummy::2asfds1329788172</semanticIdentifier>
+		
+			<field name="title" value="An Application for Web Mining Systems with Services Oriented Architecture" />
+			<field name="identifier.issn" value="2070-3724" />
+			<field name="language" value="Inglês" />
+			<field name="publicationDate" value="2010" />
+			<field name="volume" value="63" />
+			<field name="series" value="01" />
+			<field name="startPage" value="298/53" />
+			<field name="endPage" value="305" />
+			<field name="type" value="article" />
+			<field name="keyword" value="Web Mining" />
+			<field name="keyword" value="Web Services" />
+			<field name="keyword" value="Service Oriented Architecture" />
+			<field name="resourceUrl"
+				value="http://www.waset.org/journals/waset/v63/v63-53.pdf" />
+		</entity>
+
+		<entity type="Person" ref="Person2" source="LATTES" record="4687858846001290" item="dummy::2550201329788172" lastUpdate="2020-10-02 18:48:05.123">
+			<semanticIdentifier>dummy::2550201329788172</semanticIdentifier>
+			<!--identifiers -->
+			<field name="identifier.lattes" value="2550201329788172" />
+			<!--other data -->
+			<field name="name" value="Thiago Magela Rodrigues Dias" />
+			<field name="citationName" value="DIAS, T. M. R." />
+		</entity>
+
+		<entity type="Person" ref="Person3">
+			<semanticIdentifier>6099942406051896</semanticIdentifier>
+			<!--identifiers -->
+			<field name="identifier.lattes" value="6099942406051896" />
+			<!--other data -->
+			<field name="name" value="Paulo Eduardo Maciel Almeida" />
+			<field name="citationName" value="Paulo E. M. Almeida" />
+		</entity>
+
+		<entity type="Publication" ref="Publication2">
+			<semanticIdentifier>dummy::FF502233667a01329788172</semanticIdentifier>
+			<field name="title" value="Identification of Coauthors in Scientific Database" />
+			<field name="identifier.issn" value="2010-3778" />
+			<field name="language" value="Inglês" />
+			<field name="publicationDate" value="2014" />
+			<field name="volume" value="08" />
+			<field name="series" value="02" />
+			<field name="startPage" value="778" />
+			<field name="endPage" value="782" />
+			<field name="type" value="article" />
+			<field name="keyword" value="Colaboração Científica" />
+			<field name="keyword" value="Integração de dados da Web" />
+			<field name="keyword" value="Redes Sociais" />
+		</entity>
+
+	</entities>
+	<relations>
+		<relation type="Authorship" fromEntityRef="Publication1" toEntityRef="Person1" > />
+			<attributes>
+				<field name="order" value="1" />
+			</attributes>
+		</relation>
+		<relation type="Authorship" fromEntityRef="Publication1" toEntityRef="Person2" > />
+			<attributes>
+				<field name="order" value="2" />
+			</attributes>
+		</relation>
+		<relation type="Authorship" fromEntityRef="Publication1" toEntityRef="Person3" > />
+			<attributes>
+				<field name="order" value="3" />
+			</attributes>
+		</relation>
+
+	</relations>
+
+</entity-relation-data>

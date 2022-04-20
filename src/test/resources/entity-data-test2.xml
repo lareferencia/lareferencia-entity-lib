@@ -1,0 +1,61 @@
+<?xml version='1.0' encoding='utf-8' standalone='yes'?>
+<!--
+  ~   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
+  ~
+  ~   This program is free software: you can redistribute it and/or modify
+  ~   it under the terms of the GNU Affero General Public License as published by
+  ~   the Free Software Foundation, either version 3 of the License, or
+  ~   (at your option) any later version.
+  ~
+  ~   This program is distributed in the hope that it will be useful,
+  ~   but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ~   GNU Affero General Public License for more details.
+  ~
+  ~   You should have received a copy of the GNU Affero General Public License
+  ~   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  ~
+  ~   This file is part of LA Referencia software platform LRHarvester v4.x
+  ~   For any further information please contact Lautaro Matas <lmatas@gmail.com>
+  -->
+
+<entity-relation-data source="LATTES" record="200785884600200" lastUpdate="2020-10-02 18:48:05.123" >
+	<entities>
+		<entity type="Person" ref="Person1">
+			<semanticIdentifier>lattes::4687858846001290</semanticIdentifier>
+			<semanticIdentifier>orcid::0000-0001-5057-9936</semanticIdentifier>
+			<semanticIdentifier>dummy::2550201329788172</semanticIdentifier>
+			
+			<!--identifiers -->
+			<field name="identifier.lattes" value="4687858846001290" />
+			<field name="identifier.orcid"
+				value="https://orcid.org/0000-0001-5057-9936" />
+			<!--other data -->
+			<field name="name" value="Thiago Magela Rodrigues Dias" />
+			<field name="citationName" value="DIAS, THIAGO MAGELA" />
+			<field name="citationName" value="DIAS, T. M. R." />
+			<field name="citationName"
+				value="DIAS, THIAGO MAGELA RODRIGUES" />
+			<field name="citationName" value="DIAS, THIAGO" />
+			<field name="citationName" value="DIAS, Thiago. M. R." />
+			<field name="birthCountry" value="Brasil" />
+			<field name="birthState" value="MG" />
+			<field name="birthCity" value="Divinópolis" />
+			<field name="nationality" value="Brasil" />
+			<field name="researchArea" value="1.03.00.00-7" />
+			<field name="researchArea" value="6.07.02.02-8" />
+			<field name="researchArea" value="6.07.02.03-6" />
+			<field name="researchArea" value="1.03.03.04-9" />
+			<field name="researchArea" value="1.03.03.03-0" />
+			<field name="researchArea" value="1.03.03.02-2" />
+			<field name="miniBiography" lang="por"
+				value="Doutor em Modelagem Matemática e Computacional pelo CEFET-MG tendo trabalhado com Bibliometria, Extração de Dados Científicos e Análise de Redes de Colaboração Científica. Mestre em Modelagem Matemática e Computacional pelo CEFET-MG (2008), trabalhando com Arquitetura Orientada a Serviços e Web Mining com o tema: Uma Arquitetura Orientada a Serviços para emprego em Sistemas de Mineração de Dados na Web. Possui graduação em Ciência da Computação pelo Centro Universitário de Formiga - UNIFOR (2004), além de Especialização em Produção de Software - com Ênfase em Software Livre pela UFLA (2007) e Especialização em Melhoria do Processo de Software, UFLA (2007). Atua como Professor no Centro Federal de Educação Tecnológica de Minas Gerais (CEFET-MG) lecionando disciplinas na Graduação e Pós-graduação da instituição. Tem experiência na área de Ciência da Computação e Ciência da Informação, atuando principalmente nos seguintes temas: Bibliometria, Cientometria, Extração e Integração de Dados, Análise de Redes Sociais, Análise de Redes de Colaboração Científica, Acesso Aberto, Organização da Informação, Ciência de dados, Engenharia de Software, Qualidade de Software, MPS.BR, Extreme Programming, Arquitetura Orientada a Serviços, Web Services, Data Mining, Text Mining e Web Mining." />
+			<field name="miniBiography" lang="eng"
+				value="graduate at Ciencia da Computação from Centro Universitário de Formiga (2004). Has experience in Computer Science, focusing on Computer Science, acting on the following subjects: web mining, arquitetura orientada a serviços, qualidade, extreme programming and software." />
+		  </entity>
+		
+		
+		</entities>
+
+	
+</entity-relation-data>

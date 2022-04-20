@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+
+<!--
+  ~   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
+  ~
+  ~   This program is free software: you can redistribute it and/or modify
+  ~   it under the terms of the GNU Affero General Public License as published by
+  ~   the Free Software Foundation, either version 3 of the License, or
+  ~   (at your option) any later version.
+  ~
+  ~   This program is distributed in the hope that it will be useful,
+  ~   but WITHOUT ANY WARRANTY; without even the implied warranty of
+  ~   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  ~   GNU Affero General Public License for more details.
+  ~
+  ~   You should have received a copy of the GNU Affero General Public License
+  ~   along with this program.  If not, see <http://www.gnu.org/licenses/>.
+  ~
+  ~   This file is part of LA Referencia software platform LRHarvester v4.x
+  ~   For any further information please contact Lautaro Matas <lmatas@gmail.com>
+  -->
+
+<entity-relation-metamodel>
+	<entities>
+		<entity name="Person">
+			<!-- identifiers -->
+			<field name="identifier.lattes" />
+			<field name="identifier.lattesShort" />
+			<field name="identifier.cpf" />
+			<field name="identifier.orcid" />
+			<field name="identifier.researcherID" />
+			<field name="identifier.scopusAuthorID" />
+			<field name="identifier.cienciaID" />
+			<field name="identifier.other" />
+			<field name="name" />
+			<field name="familyName" />
+			<field name="givenName" />
+			<field name="alternateName" description="An alias for the item." />
+			<field name="citationName" /> 
+			<field name="gender" /> 
+			<field name="electronicAddress" /> 
+			<field name="birthDate" /> 
+			<field name="birthCountry" />
+			<field name="birthState" />
+			<field name="birthCity" />
+			<field name="nationality" />
+			<field name="researchArea" description="CNPq vocabullary code" /> <!-- CNPq vocabullary code -->
+			<field name="fone" />
+			<field name="personalURL" />
+			<field name="miniBiography" />
+
+
+		</entity>
+
+		<entity name="Publication">
+			<field name="identifier.doi" />
+			<field name="identifier.handle" />
+			<field name="identifier.pmcid" />
+			<field name="identifier.isi-number" />
+			<field name="identifier.scp-number" />
+			<field name="identifier.issn" />
+			<field name="identifier.isbn" />
+			<field name="identifier.other" />
+			<field name="type" description="COAR Resource Types - all types that descend from ‘text’" />
+			<field name="language" />
+			<field name="title" />
+			<field name="subtitle" />
+			<field name="publicationDate" />
+			<field name="startDate" />
+			<field name="endDate" />
+			<field name="degreeDate" />
+			<field name="number" />
+			<field name="volume" />
+			<field name="issue" />
+			<field name="series" />
+			<field name="edition" />
+			<field name="startPage" />
+			<field name="endPage" />
+			<field name="researchArea" description="CNPq vocabullary code" />
+			<field name="resourceUrl" />
+			<field name="rights" />
+			<field name="license" />
+			<field name="keyword" /> 
+			<field name="abstract" /> 
+			<field name="status" />
+			<field name="coverage" />
+			<field name="references" />
+			<field name="accessType" description="COAR Rights Types" />
+		</entity>
+
+
+	</entities>
+
+	<relations>
+		<relation name="Authorship" description="The author of this content or rating." fromEntity="Publication" toEntity="Person">
+			<attributes>
+				<field name="order" description="If the Person is the 1st, 2st, etc author" />
+				<field name="role" description="If the Person has an specific role in the production of the content" />
+				<field name="affiliation" description="An organization such as a school, NGO, corporation, club, etc. - The name of the item." />
+				<field name="cnpqCodOrgUnit" description="OrgUnit code provided by CNPq" />
+			</attributes>
+		</relation>
+	</relations>
+
+</entity-relation-metamodel>
