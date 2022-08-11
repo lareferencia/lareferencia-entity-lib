@@ -25,14 +25,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
+import org.apache.http.HttpHost;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.common.xcontent.XContentType;
+
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityType;
@@ -46,10 +42,17 @@ import org.lareferencia.core.entity.indexing.nested.config.IndexingConfiguration
 import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.services.EntityDataService;
+import org.opensearch.action.bulk.BulkRequest;
+import org.opensearch.action.bulk.BulkResponse;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.client.RequestOptions;
+import org.opensearch.client.RestClient;
+import org.opensearch.client.RestClientBuilder;
+import org.opensearch.client.RestHighLevelClient;
+import org.opensearch.common.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.data.elasticsearch.client.ClientConfiguration;
-import org.springframework.data.elasticsearch.client.RestClients;
+
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,7 +76,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	ObjectMapper jsonMapper;
 
-	RestHighLevelClient elasticClient = null;
+	RestHighLevelClient client = null;
 
 	@Value("${elastic.host:localhost}")
 	private String host;
@@ -176,7 +179,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		while ( retry ) {
 
 			try {
-				BulkResponse bulkResponse = elasticClient.bulk(bulkRequest, RequestOptions.DEFAULT);
+				BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
 				logger.info( "Bulk request result: " + bulkResponse.status().toString() );
 
 				retry = false;
@@ -203,9 +206,12 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 
 		try {
-			ClientConfiguration clientConfiguration = ClientConfiguration.builder().connectedTo(host.trim() + ":" + port.toString() ).build();
-
-			elasticClient = RestClients.create(clientConfiguration).rest(); 
+			RestClientBuilder builder = RestClient.builder( new HttpHost(host.trim(), port ) );
+			// Create the transport with a Jackson mapper
+			
+			client = new RestHighLevelClient(builder);
+			
+			
 		} catch (Exception e) {
 			throw new EntityIndexingException("Error connecting elasticsearch:" + host + ":" + port + e.getMessage());
 		}

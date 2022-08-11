@@ -1,23 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  ~   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
-  ~
-  ~   This program is free software: you can redistribute it and/or modify
-  ~   it under the terms of the GNU Affero General Public License as published by
-  ~   the Free Software Foundation, either version 3 of the License, or
-  ~   (at your option) any later version.
-  ~
-  ~   This program is distributed in the hope that it will be useful,
-  ~   but WITHOUT ANY WARRANTY; without even the implied warranty of
-  ~   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-  ~   GNU Affero General Public License for more details.
-  ~
-  ~   You should have received a copy of the GNU Affero General Public License
-  ~   along with this program.  If not, see <http://www.gnu.org/licenses/>.
-  ~
-  ~   This file is part of LA Referencia software platform LRHarvester v4.x
-  ~   For any further information please contact Lautaro Matas <lmatas@gmail.com>
-  -->
+<!-- ~ Copyright (c) 2013-2022. LA Referencia / Red CLARA and others ~ ~ 
+	This program is free software: you can redistribute it and/or modify ~ it 
+	under the terms of the GNU Affero General Public License as published by 
+	~ the Free Software Foundation, either version 3 of the License, or ~ (at 
+	your option) any later version. ~ ~ This program is distributed in the hope 
+	that it will be useful, ~ but WITHOUT ANY WARRANTY; without even the implied 
+	warranty of ~ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the 
+	~ GNU Affero General Public License for more details. ~ ~ You should have 
+	received a copy of the GNU Affero General Public License ~ along with this 
+	program. If not, see <http://www.gnu.org/licenses/>. ~ ~ This file is part 
+	of LA Referencia software platform LRHarvester v4.x ~ For any further information 
+	please contact Lautaro Matas <lmatas@gmail.com> -->
 
 <project xmlns="http://maven.apache.org/POM/4.0.0"
 	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -30,6 +23,11 @@
 	<name>LA Referencia entity lib</name>
 	<description>LA Referencia entity-relation library</description>
 	<version>4.1.0</version>
+
+	<properties>
+		<elastic.version>7.17.5</elastic.version>
+	</properties>
+
 
 	<parent>
 		<groupId>org.lareferencia</groupId>
@@ -45,10 +43,7 @@
 			<version>4.1.0</version>
 		</dependency>
 
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-elasticsearch</artifactId>
-		</dependency>
+
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
 			<artifactId>spring-boot-starter-data-jpa</artifactId>
@@ -66,6 +61,24 @@
 			<artifactId>spring-boot-starter-test</artifactId>
 		</dependency>
 
+
+		<dependency>
+		  <groupId>org.opensearch.client</groupId>
+		  <artifactId>opensearch-rest-client</artifactId>
+		  <version>1.2.4</version>
+		</dependency>
+		<dependency>
+		  <groupId>org.opensearch.client</groupId>
+		  <artifactId>opensearch-rest-high-level-client</artifactId>
+		  <version>1.2.4</version>
+		</dependency>
+		<dependency>
+		  <groupId>org.opensearch.client</groupId>
+		  <artifactId>opensearch-java</artifactId>
+		  <version>0.1.0</version>
+		</dependency>
+
+
 		<dependency>
 			<groupId>org.junit.vintage</groupId>
 			<artifactId>junit-vintage-engine</artifactId>
@@ -82,11 +95,6 @@
 			<groupId>org.postgresql</groupId>
 			<artifactId>postgresql</artifactId>
 			<scope>runtime</scope>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.data</groupId>
-			<artifactId>spring-data-solr</artifactId>
 		</dependency>
 
 		<dependency>
@@ -125,9 +133,9 @@
 		</dependency>
 
 		<dependency>
-  			<groupId>com.github.ben-manes.caffeine</groupId>
-  			<artifactId>caffeine</artifactId>
-  			<version>3.0.5</version>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
+			<version>3.0.5</version>
 		</dependency>
 
 
