@@ -74,4 +74,18 @@ public class FieldIndexingConfig {
 	public Boolean getSortable() {
 		return sortable;
 	}
+
+	String filter;
+	@XmlAttribute(name="filter", required = false)
+	public String getFilter() {
+		return filter;
+	}
+
+	Boolean filterOneValue = false;
+	@XmlAttribute(name="filter-one-value", required = false)
+	public Boolean getFilterOneValue() {
+		return filterOneValue;
+	}
+
+
 }
