@@ -366,7 +366,14 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		
 		// if field filter is defined and the services is available, apply it
 		if ( fieldOccurrenceFilterService != null && config.getFilter() != null ) {
-			occurrences = fieldOccurrenceFilterService.filter(occurrences, config);
+			// get the params from the config
+			Map<String, String> filterParams = config.getParams();
+
+			// add the field name to the params
+			filterParams.put("field", config.getSourceField());
+			filterParams.put("subfield", config.getSourceSubfield());
+
+			occurrences = fieldOccurrenceFilterService.filter(occurrences, config.getFilter(), filterParams);
 		}
 
 		for (FieldOccurrence occr : occurrences)

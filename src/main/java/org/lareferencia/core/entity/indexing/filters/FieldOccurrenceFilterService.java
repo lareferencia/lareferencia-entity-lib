@@ -66,14 +66,14 @@ public class FieldOccurrenceFilterService {
 	/**
 	 * This method applies the filters to the collection of FieldOccurrences
 	 * @param occurrences
-	 * @param config
+	 * @param params
 	 * @return
 	 */
-	public Collection<FieldOccurrence> filter(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config) {
+	public Collection<FieldOccurrence> filter(Collection<FieldOccurrence> occurrences, String filterName, Map<String,String> params) {
 
 		// if filter is defined, apply it
-		if ( config.getFilter() != null && filters.containsKey(config.getFilter()) )
-			return filters.get( config.getFilter() ).filter(occurrences, config);
+		if ( filters.containsKey(filterName) )
+			return filters.get( filterName ).filter(occurrences, params);
 		else // if no filter is defined, return the original collection
 			return occurrences;
 	}

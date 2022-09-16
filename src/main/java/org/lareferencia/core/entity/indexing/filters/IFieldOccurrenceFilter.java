@@ -10,6 +10,6 @@ public interface IFieldOccurrenceFilter {
 
 
     public String getName();
-    public Collection<FieldOccurrence> filter(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config);
+    public Collection<FieldOccurrence> filter(Collection<FieldOccurrence> occurrences, Map<String,String> params);
 
 }

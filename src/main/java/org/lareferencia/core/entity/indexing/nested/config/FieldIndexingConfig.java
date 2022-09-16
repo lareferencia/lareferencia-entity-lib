@@ -20,10 +20,14 @@
 
 package org.lareferencia.core.entity.indexing.nested.config;
 
+import javax.xml.bind.annotation.XmlAnyAttribute;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlRootElement;
 
 import lombok.Setter;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @XmlRootElement
 @Setter
@@ -81,10 +85,11 @@ public class FieldIndexingConfig {
 		return filter;
 	}
 
-	Boolean filterOneValue = false;
-	@XmlAttribute(name="filter-one-value", required = false)
-	public Boolean getFilterOneValue() {
-		return filterOneValue;
+	// This attribute is used to store any extra information
+	Map<String,String> params = new HashMap<String,String>();
+	@XmlAnyAttribute
+	public Map<String,String> getParams() {
+		return params;
 	}
 
 
