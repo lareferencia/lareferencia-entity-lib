@@ -36,6 +36,7 @@ import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.Relation;
 import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
+import org.lareferencia.core.entity.indexing.filters.FieldOccurrenceFilterService;
 import org.lareferencia.core.entity.indexing.nested.config.EntityIndexingConfig;
 import org.lareferencia.core.entity.indexing.nested.config.FieldIndexingConfig;
 import org.lareferencia.core.entity.indexing.nested.config.IndexingConfiguration;
@@ -59,6 +60,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import org.springframework.context.ApplicationContext;
 
 public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
@@ -99,6 +101,13 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	BulkRequest bulkRequest;
 
 	private static int MAX_RETRIES = 10;
+
+	@Autowired
+	ApplicationContext context;
+
+	// this will be used to filter out fields that are not to be indexed
+	// will be injected by spring context on set config method
+	FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
 	@Override
 	public void index(Entity entity) throws EntityIndexingException {
@@ -203,6 +212,17 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	@Override
 	public void setConfig(String configFilePath) throws EntityIndexingException {
+
+		// load field occurrence filter service and load filters into it
+		try {
+			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
+			if ( fieldOccurrenceFilterService != null )
+				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
+
+			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
+		} catch (Exception e) {
+			logger.warn("Error loading field occurrence filters: " + e.getMessage());
+		}
 
 
 		try {
@@ -343,6 +363,18 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	private void processFieldOccurrence(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config,
 			JSONEntityElastic ientity) {
+		
+		// if field filter is defined and the services is available, apply it
+		if ( fieldOccurrenceFilterService != null && config.getFilter() != null ) {
+			// get the params from the config
+			Map<String, String> filterParams = config.getParams();
+
+			// add the field name to the params
+			filterParams.put("field", config.getSourceField());
+			filterParams.put("subfield", config.getSourceSubfield());
+
+			occurrences = fieldOccurrenceFilterService.filter(occurrences, config.getFilter(), filterParams);
+		}
 
 		for (FieldOccurrence occr : occurrences)
 			try {
