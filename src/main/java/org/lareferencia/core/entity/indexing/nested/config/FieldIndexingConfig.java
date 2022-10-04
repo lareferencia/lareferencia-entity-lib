@@ -23,6 +23,7 @@ package org.lareferencia.core.entity.indexing.nested.config;
 import javax.xml.bind.annotation.XmlAnyAttribute;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlRootElement;
+import javax.xml.namespace.QName;
 
 import lombok.Setter;
 
@@ -86,9 +87,20 @@ public class FieldIndexingConfig {
 	}
 
 	// This attribute is used to store any extra information
-	Map<String,String> params = new HashMap<String,String>();
+	Map<QName,String> qnameParams = new HashMap<QName,String>();
 	@XmlAnyAttribute
+	public Map<QName,String> getQnameParams() {
+		return qnameParams;
+	}
+
+	// this translates the qnameParams to a Map<String,String>
 	public Map<String,String> getParams() {
+		Map<String,String> params = new HashMap<String,String>();
+
+		for ( QName qname : qnameParams.keySet() ) {
+			params.put(qname.getLocalPart(), qnameParams.get(qname));
+		}
+
 		return params;
 	}
 
