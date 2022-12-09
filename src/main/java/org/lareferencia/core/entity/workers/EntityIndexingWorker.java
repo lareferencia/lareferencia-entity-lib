@@ -119,7 +119,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 
 		} catch (Exception e) {
 
-			String msg = "Error indexing entity internalID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
+			String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
 			logError(msg);
 		}
 
