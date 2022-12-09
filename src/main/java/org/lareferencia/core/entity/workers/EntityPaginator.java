@@ -51,6 +51,8 @@ public class EntityPaginator implements IPaginator<Entity> {
 
 	@Override
 	public int getStartingPage() { return actualPage; }
+	
+	Page<Entity> page = null;
 
 
 	public EntityPaginator(EntityRepository repository, EntityType entityType) {
@@ -102,7 +104,7 @@ public class EntityPaginator implements IPaginator<Entity> {
 	
 	private Page<Entity> obtainPage() {
 					
-		Page<Entity> page = null;
+		page = null;
 		Pageable pageable = PageRequest.of(actualPage-1, pageSize);
 		
 		if ( entityType != null )
