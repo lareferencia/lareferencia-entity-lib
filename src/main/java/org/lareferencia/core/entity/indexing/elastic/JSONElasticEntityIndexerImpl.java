@@ -64,6 +64,10 @@ import org.springframework.context.ApplicationContext;
 
 public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
+	private Long entityCount;
+	private Long jsonEntityCount;
+	private Long sentEntityCount;
+	
 	private static Logger logger = LogManager.getLogger(JSONElasticEntityIndexerImpl.class);
 
 	private IndexingConfiguration indexingConfiguration;
@@ -112,6 +116,8 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	@Override
 	public void index(Entity entity) throws EntityIndexingException {
 
+		entityCount++;
+		
 		try {
 
 			EntityType type = entityDataService.getEntityTypeFromId(entity.getEntityTypeId());
@@ -126,6 +132,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
 
 			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity, relationsMap);
+			jsonEntityCount++;
 
 			for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
 
@@ -204,6 +211,8 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 					throw new EntityIndexingException("Bulk request to elastic failed :: " + e.getClass().toString()  +  e.getMessage());
 			}
 		}
+		sentEntityCount += bulkRequest.numberOfActions();
+		logger.info("Total entities: " + entityCount + ", total JSON entities: " + jsonEntityCount + ", total sent entities: " + sentEntityCount);
 
 		//create a new empty request
 		bulkRequest = new BulkRequest();
@@ -213,6 +222,8 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	@Override
 	public void setConfig(String configFilePath) throws EntityIndexingException {
 
+		entityCount = jsonEntityCount = sentEntityCount = 0L;
+		
 		// load field occurrence filter service and load filters into it
 		try {
 			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
