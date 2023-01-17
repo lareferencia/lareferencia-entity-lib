@@ -199,6 +199,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 				logger.info( "Bulk request result: " + bulkResponse.status().toString() );
 
 				retry = false;
+				
+				if ( bulkResponse.hasFailures() ) {
+				    logger.info( "Bulk request has failures: " + bulkResponse.buildFailureMessage() );
+				}
 
 			} catch (Exception e) {
 				logger.warn("retrying: " + retries + " -- Warning: " + e.getClass().toString() + " " + e.getMessage() );
