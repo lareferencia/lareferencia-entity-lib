@@ -51,11 +51,9 @@ import org.opensearch.client.RequestOptions;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.RestClientBuilder;
 import org.opensearch.client.RestHighLevelClient;
-import org.opensearch.client.base.BooleanResponse;
 import org.opensearch.client.indices.CreateIndexRequest;
 import org.opensearch.client.indices.CreateIndexResponse;
 import org.opensearch.client.indices.GetIndexRequest;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.common.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -282,16 +280,18 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
 
 			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices()) {
-				// put entity indexing config in the map
+
+				// put entity indexing config in the map for later use
 				configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
-				// create/setup mapping
+
+				// create index if not exists, calculate and set mapping
 				createOrUpdateIndexMapping(entityIndexingConfig);
 			}
 
-			logger.info("Nested Indexer Config File: " + indexingConfigFilename + " loaded");
+			logger.info("Elastic Indexer Config File: " + indexingConfigFilename + " loaded");
 
 		} catch (Exception e) {
-			throw new EntityIndexingException("Nested Indexer Config File: " + indexingConfigFilename + e.getMessage());
+			throw new EntityIndexingException("Error loading Elastic Indexer Config File: " + indexingConfigFilename + e.getMessage());
 		}
 
 		// Create indices and mappings
@@ -311,73 +311,52 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		bulkRequest.timeout("2m");
 	}
 
+	private Map<String, Object> createTypeMapping(String type) {
+
+		Map<String, Object> fieldMapping = new HashMap<String, Object>();
+		fieldMapping.put("type", type);
+
+		return fieldMapping;
+	}
+
 	private void createOrUpdateIndexMapping( EntityIndexingConfig entityIndexingConfig ) throws EntityIndexingException {
+
+		// create mapping based on entity indexing config
+		HashMap<String, Object> typesMapping = new HashMap<String, Object>();
+		HashMap<String, Object> mapping = new HashMap<String, Object>();
+		mapping.put("properties", typesMapping);
+
+		// add fields to mapping
+		for ( FieldIndexingConfig fieldIndexingConfig : entityIndexingConfig.getIndexFields() )
+			typesMapping.put( fieldIndexingConfig.getName(),  createTypeMapping(fieldIndexingConfig.getType() ) );
+
 
 		// check if index exists
 		try {
 			Boolean indexExists = client.indices().exists(new GetIndexRequest(entityIndexingConfig.getName() ), RequestOptions.DEFAULT);
 
 			if ( indexExists ) {
-				logger.info("Index " + entityIndexingConfig.getName() + " already exists");
+				logger.warn("Index " + entityIndexingConfig.getName() + " already exists. Is not possible to update mapping !!!");
 
 			} else {
-				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it");
+				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: " + mapping.toString() + "");
+
 				// create index
-				CreateIndexRequest createIndexRequest = new CreateIndexRequest(entityIndexingConfig.getName());
+				CreateIndexRequest createIndexRequest = new CreateIndexRequest( entityIndexingConfig.getName() );
 				//createIndexRequest.settings(Settings.builder() //Specify in the settings how many shards you want in the index.
 				//		.put("index.number_of_shards", 4)
 				//		.put("index.number_of_replicas", 3)
 				//);
 
+				createIndexRequest.mapping(mapping);
+				CreateIndexResponse createIndexResponse = client.indices().create(createIndexRequest, RequestOptions.DEFAULT);
 
-				//Create a set of maps for the index's mappings.
-				HashMap<String, String> typeMapping = new HashMap<String,String>();
-
-
-				typeMapping.put("type", "text");
-				typeMapping.put("index", "true");
-				typeMapping.put("analyzer", "standard");
-				typeMapping.put("search_analyzer", "standard");
-				typeMapping.put("term_vector", "with_positions_offsets");
-				typeMapping.put("store", "true");
-				typeMapping.put("fielddata", "true");
-				typeMapping.put("doc_values", "true");
-				typeMapping.put("norms", "true");
-				typeMapping.put("boost", "1.0");
-				typeMapping.put("null_value", "null");
-				typeMapping.put("copy_to", "null");
-				typeMapping.put("ignore_above", "2147483647");
-				typeMapping.put("similarity", "BM25");
-				typeMapping.put("eager_global_ordinals", "false");
-				typeMapping.put("index_options", "positions");
-				typeMapping.put("store", "true");
-				typeMapping.put("fielddata", "true");
-				typeMapping.put("doc_values", "true");
-				typeMapping.put("norms", "true");
-				typeMapping.put("boost", "1.0");
-				typeMapping.put("null_value", "null");
-				typeMapping.put("copy_to", "null");
-				typeMapping.put("ignore_above", "2147483647");
-				typeMapping.put("similarity", "BM25");
-				typeMapping.put("eager_global_ordinals", "false");
-				typeMapping.put("index_options", "positions");
-				typeMapping.put("store", "true");
-				typeMapping.put("fielddata", "true");
-				typeMapping.put("doc_values", "true");
-				typeMapping.put("norms", "true");
-				typeMapping.put("boost", "1.0");
+				logger.info("Index " + entityIndexingConfig.getName() + " created: " + createIndexResponse.isAcknowledged() + "");
 			}
 
 		} catch (IOException e) {
 			throw new EntityIndexingException("Communication Error checking if index exists: " + e.getMessage());
 		}
-		
-		// crear indice si no existe
-
-		// calcular el mapping de los tipos de entidad
-
-		// enviar mapping a elastic
-
 	}
 
 	protected JSONEntityElastic createIEntity(String id, String type) {
