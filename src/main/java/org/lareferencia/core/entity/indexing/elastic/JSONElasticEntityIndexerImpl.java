@@ -21,6 +21,7 @@
 
 package org.lareferencia.core.entity.indexing.elastic;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
@@ -50,6 +51,11 @@ import org.opensearch.client.RequestOptions;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.RestClientBuilder;
 import org.opensearch.client.RestHighLevelClient;
+import org.opensearch.client.base.BooleanResponse;
+import org.opensearch.client.indices.CreateIndexRequest;
+import org.opensearch.client.indices.CreateIndexResponse;
+import org.opensearch.client.indices.GetIndexRequest;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.common.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -192,6 +198,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 				logger.info( "Bulk request result: " + bulkResponse.status().toString() );
 
 				retry = false;
+				
+				if ( bulkResponse.hasFailures() ) {
+				    logger.info( "Bulk request has failures: " + bulkResponse.buildFailureMessage() );
+				}
 
 			} catch (Exception e) {
 				logger.warn("retrying: " + retries + " -- Warning: " + e.getClass().toString() + " " + e.getMessage() );
@@ -230,10 +240,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			// Create the transport with a Jackson mapper
 			
 			client = new RestHighLevelClient(builder);
-			
-			
+
 		} catch (Exception e) {
-			throw new EntityIndexingException("Error connecting elasticsearch:" + host + ":" + port + e.getMessage());
+			throw new EntityIndexingException("Error connecting elasticsearch/opensearch:" + host + ":" + port + e.getMessage());
 		}
 	/*
 		final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
@@ -272,8 +281,12 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
 
-			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices())
+			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices()) {
+				// put entity indexing config in the map
 				configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
+				// create/setup mapping
+				createOrUpdateIndexMapping(entityIndexingConfig);
+			}
 
 			logger.info("Nested Indexer Config File: " + indexingConfigFilename + " loaded");
 
@@ -281,6 +294,13 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			throw new EntityIndexingException("Nested Indexer Config File: " + indexingConfigFilename + e.getMessage());
 		}
 
+		// Create indices and mappings
+
+
+
+
+
+		// JSON MAPPER
 		jsonMapper = new ObjectMapper();
 		SimpleModule module = new SimpleModule();
 		module.addSerializer(JSONEntityElastic.class, new JSONEntityElasticSerializer());
@@ -289,6 +309,75 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		// String serialized = mapper.writeValueAsString(myItem);
 		bulkRequest = new BulkRequest();
 		bulkRequest.timeout("2m");
+	}
+
+	private void createOrUpdateIndexMapping( EntityIndexingConfig entityIndexingConfig ) throws EntityIndexingException {
+
+		// check if index exists
+		try {
+			Boolean indexExists = client.indices().exists(new GetIndexRequest(entityIndexingConfig.getName() ), RequestOptions.DEFAULT);
+
+			if ( indexExists ) {
+				logger.info("Index " + entityIndexingConfig.getName() + " already exists");
+
+			} else {
+				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it");
+				// create index
+				CreateIndexRequest createIndexRequest = new CreateIndexRequest(entityIndexingConfig.getName());
+				//createIndexRequest.settings(Settings.builder() //Specify in the settings how many shards you want in the index.
+				//		.put("index.number_of_shards", 4)
+				//		.put("index.number_of_replicas", 3)
+				//);
+
+
+				//Create a set of maps for the index's mappings.
+				HashMap<String, String> typeMapping = new HashMap<String,String>();
+
+
+				typeMapping.put("type", "text");
+				typeMapping.put("index", "true");
+				typeMapping.put("analyzer", "standard");
+				typeMapping.put("search_analyzer", "standard");
+				typeMapping.put("term_vector", "with_positions_offsets");
+				typeMapping.put("store", "true");
+				typeMapping.put("fielddata", "true");
+				typeMapping.put("doc_values", "true");
+				typeMapping.put("norms", "true");
+				typeMapping.put("boost", "1.0");
+				typeMapping.put("null_value", "null");
+				typeMapping.put("copy_to", "null");
+				typeMapping.put("ignore_above", "2147483647");
+				typeMapping.put("similarity", "BM25");
+				typeMapping.put("eager_global_ordinals", "false");
+				typeMapping.put("index_options", "positions");
+				typeMapping.put("store", "true");
+				typeMapping.put("fielddata", "true");
+				typeMapping.put("doc_values", "true");
+				typeMapping.put("norms", "true");
+				typeMapping.put("boost", "1.0");
+				typeMapping.put("null_value", "null");
+				typeMapping.put("copy_to", "null");
+				typeMapping.put("ignore_above", "2147483647");
+				typeMapping.put("similarity", "BM25");
+				typeMapping.put("eager_global_ordinals", "false");
+				typeMapping.put("index_options", "positions");
+				typeMapping.put("store", "true");
+				typeMapping.put("fielddata", "true");
+				typeMapping.put("doc_values", "true");
+				typeMapping.put("norms", "true");
+				typeMapping.put("boost", "1.0");
+			}
+
+		} catch (IOException e) {
+			throw new EntityIndexingException("Communication Error checking if index exists: " + e.getMessage());
+		}
+		
+		// crear indice si no existe
+
+		// calcular el mapping de los tipos de entidad
+
+		// enviar mapping a elastic
+
 	}
 
 	protected JSONEntityElastic createIEntity(String id, String type) {
@@ -332,7 +421,11 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	private void processFieldConfig(Entity entity, Multimap<String, Relation> relationsMap, FieldIndexingConfig config,
 			JSONEntityElastic ientity) throws EntityIndexingException {
 
+
 		String sourceFieldName = config.getSourceField();
+
+		// tratar caso de lista de campos
+
 
 		if (sourceFieldName == null)
 			throw new EntityIndexingException(
