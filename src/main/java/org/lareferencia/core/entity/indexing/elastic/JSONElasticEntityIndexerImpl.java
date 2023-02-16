@@ -147,73 +147,47 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		// Build the rest client for elasticsearch/opensearch connection
 		try {
 
-			// if the opensearch/elasticsearch connection is secure, we need to use the https protocol and a valid certificate
-			if ( useSSL ) {
+			// create a credentials provider to authenticate with the given username and password
+			final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+			credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username.trim(), password.trim()));
 
-				// create a trust all strategy to accept any certificate
-				final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE).build();
+			// create a trust all strategy to accept any certificate
+			final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE).build();
 
-				// if authentication is required, we need to set the credentials provider
-				final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-				credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username.trim(), password.trim()));
+			//Create a client builder with the given host and port, and the ssl context and credentials provider
+			RestClientBuilder builder = RestClient.builder(new HttpHost( host.trim(), port, useSSL ? "https" : "http"))
+					.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
+						@Override
+						public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
 
-				//Create a client builder with the given host and port, and the ssl context and credentials provider
-				RestClientBuilder builder = RestClient.builder(new HttpHost( host.trim(), port, "https"))
-						.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
-							@Override
-							public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
-								return httpClientBuilder.setSSLContext(sslContext).setDefaultCredentialsProvider(credentialsProvider);
-							}
-						});
+							HttpAsyncClientBuilder builder = httpClientBuilder;
 
-				// create the client
-				client = new RestHighLevelClient(builder);
+							// if ssl is required, we need to set the ssl context
+							if ( useSSL )
+								builder = httpClientBuilder.setSSLContext(sslContext);
+							else
+							// if ssl is not required, we just copy the original builder
+								builder = httpClientBuilder;
 
-//				client = new RestHighLevelClient(RestClient
-//						//port number is given as 443 since its https schema
-//						.builder(new HttpHost(host.trim(), port, "https"))
-//						.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
-//							@Override
-//							public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
-//
-//								// if authentication is required, we need to set the credentials provider
-//								if ( authenticate)
-//									return httpClientBuilder
-//											.setSSLContext(sslContext)
-//											.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE)
-//											.setDefaultCredentialsProvider(credentialsProvider);
-//
-//								else
-//									return httpClientBuilder
-//										.setSSLContext(sslContext)
-//										.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);
-//							}
-//						})
-//						.setRequestConfigCallback(new RestClientBuilder.RequestConfigCallback() {
-//							@Override
-//							public RequestConfig.Builder customizeRequestConfig(
-//									RequestConfig.Builder requestConfigBuilder) {
-//								return requestConfigBuilder.setConnectTimeout(5000)
-//										.setSocketTimeout(120000);
-//							}
-//						}));
+							// if authentication is required, we need to set the credentials provider
+							if ( authenticate )
+								builder = builder.setDefaultCredentialsProvider(credentialsProvider);
 
+							return builder;
+						}
+					});
 
-			} else { // if the connection is not secure, we use the http protocol
-
-				RestClientBuilder builder = RestClient.builder( new HttpHost(host.trim(), port ) );
-				client = new RestHighLevelClient(builder);
-			}
+			// create the client
+			client = new RestHighLevelClient(builder);
 
 			// check if the connection is ok
 			client.ping(RequestOptions.DEFAULT);
-			
-            logger.info("Elasticsearch/Opensearch connection created: " + host + ":" + port + " using SSL");
+            logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ") + (authenticate ? " using authentication" : ""));
 
 
 		} catch (Exception e) {
 		    logger.error("Error connecting elasticsearch/opensearch:" + host + ":" + port + " :: " + e.getMessage());
-			throw new EntityIndexingException("Connection Error");
+			throw new EntityIndexingException(" Elastic Client creation error ");
 		}
 
 		this.indexingConfigFilename = configFilePath ;
