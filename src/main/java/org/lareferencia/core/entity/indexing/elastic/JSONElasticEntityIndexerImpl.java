@@ -27,6 +27,17 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.conn.ssl.NoopHostnameVerifier;
+import org.apache.http.conn.ssl.TrustAllStrategy;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+
+import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
+import org.apache.http.ssl.SSLContextBuilder;
+import org.apache.http.ssl.SSLContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -66,6 +77,8 @@ import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import org.springframework.context.ApplicationContext;
 
+import javax.net.ssl.SSLContext;
+
 public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	private static Logger logger = LogManager.getLogger(JSONElasticEntityIndexerImpl.class);
@@ -90,10 +103,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	@Value("${elastic.port:9200}")
 	private Integer port;
 
-	@Value("${elastic.username:nouser}")
+	@Value("${elastic.username:admin}")
 	private String username;
 
-	@Value("${elastic.password:nopassword}")
+	@Value("${elastic.password:admin}")
 	private String password;
 
 	@Value("${elastic.useSSL:false}")
@@ -114,6 +127,131 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
 	@Override
+	public void setConfig(String configFilePath) throws EntityIndexingException {
+
+		logger.info("Loading indexing config from: " + configFilePath);
+
+		// Load dinamic field occurrence filters from spring context
+		try {
+			// get the service from spring context
+			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
+			if ( fieldOccurrenceFilterService != null )
+				// load the filters from spring context
+				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
+
+			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
+		} catch (Exception e) {
+			logger.warn("Error loading field occurrence filters: " + e.getMessage());
+		}
+
+		// Build the rest client for elasticsearch/opensearch connection
+		try {
+
+			// if the opensearch/elasticsearch connection is secure, we need to use the https protocol and a valid certificate
+			if ( useSSL ) {
+
+				// create a trust all strategy to accept any certificate
+				final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE).build();
+
+				// if authentication is required, we need to set the credentials provider
+				final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+				credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username.trim(), password.trim()));
+
+				//Create a client builder with the given host and port, and the ssl context and credentials provider
+				RestClientBuilder builder = RestClient.builder(new HttpHost( host.trim(), port, "https"))
+						.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
+							@Override
+							public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
+								return httpClientBuilder.setSSLContext(sslContext).setDefaultCredentialsProvider(credentialsProvider);
+							}
+						});
+
+				// create the client
+				client = new RestHighLevelClient(builder);
+
+//				client = new RestHighLevelClient(RestClient
+//						//port number is given as 443 since its https schema
+//						.builder(new HttpHost(host.trim(), port, "https"))
+//						.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
+//							@Override
+//							public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
+//
+//								// if authentication is required, we need to set the credentials provider
+//								if ( authenticate)
+//									return httpClientBuilder
+//											.setSSLContext(sslContext)
+//											.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE)
+//											.setDefaultCredentialsProvider(credentialsProvider);
+//
+//								else
+//									return httpClientBuilder
+//										.setSSLContext(sslContext)
+//										.setSSLHostnameVerifier(NoopHostnameVerifier.INSTANCE);
+//							}
+//						})
+//						.setRequestConfigCallback(new RestClientBuilder.RequestConfigCallback() {
+//							@Override
+//							public RequestConfig.Builder customizeRequestConfig(
+//									RequestConfig.Builder requestConfigBuilder) {
+//								return requestConfigBuilder.setConnectTimeout(5000)
+//										.setSocketTimeout(120000);
+//							}
+//						}));
+
+
+			} else { // if the connection is not secure, we use the http protocol
+
+				RestClientBuilder builder = RestClient.builder( new HttpHost(host.trim(), port ) );
+				client = new RestHighLevelClient(builder);
+			}
+
+			// check if the connection is ok
+			client.ping(RequestOptions.DEFAULT);
+			
+            logger.info("Elasticsearch/Opensearch connection created: " + host + ":" + port + " using SSL");
+
+
+		} catch (Exception e) {
+		    logger.error("Error connecting elasticsearch/opensearch:" + host + ":" + port + " :: " + e.getMessage());
+			throw new EntityIndexingException("Connection Error");
+		}
+
+		this.indexingConfigFilename = configFilePath ;
+
+		try {
+			indexingConfiguration = IndexingConfiguration.loadFromXml(configFilePath);
+
+			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
+
+			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices()) {
+
+				// put entity indexing config in the map for later use
+				configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
+
+				// create index if not exists, calculate and set mapping
+				createOrUpdateIndexMapping(entityIndexingConfig);
+			}
+
+			logger.info("Elastic Indexer Config File: " + indexingConfigFilename + " loaded");
+
+		} catch (Exception e) {
+		    logger.error("Error procesing index configuration: " + e.getMessage());
+			throw new EntityIndexingException("Error loading Elastic Indexer Config File: " + indexingConfigFilename);
+		}
+
+
+		// JSON MAPPER
+		jsonMapper = new ObjectMapper();
+		SimpleModule module = new SimpleModule();
+		module.addSerializer(JSONEntityElastic.class, new JSONEntityElasticSerializer());
+		jsonMapper.registerModule(module);
+
+		// String serialized = mapper.writeValueAsString(myItem);
+		bulkRequest = new BulkRequest();
+		bulkRequest.timeout("2m");
+	}
+
+	@Override
 	public void index(Entity entity) throws EntityIndexingException {
 
 		try {
@@ -125,7 +263,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			if (entityIndexingConfig == null)
 				throw new EntityIndexingException(
 						"Error indexing entity: " + entity.getId() + " " + this.indexingConfigFilename
-								+ " doesn´t contains a indexing config for " + type.getName() + " EntityType");
+								+ " does not contain a indexing config for " + type.getName() + " EntityType");
 
 			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
 
@@ -218,98 +356,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		bulkRequest.timeout("2m");
 	}
 
-	@Override
-	public void setConfig(String configFilePath) throws EntityIndexingException {
 
-		// load field occurrence filter service and load filters into it
-		try {
-			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
-			if ( fieldOccurrenceFilterService != null )
-				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
-
-			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
-		} catch (Exception e) {
-			logger.warn("Error loading field occurrence filters: " + e.getMessage());
-		}
-
-
-		try {
-			RestClientBuilder builder = RestClient.builder( new HttpHost(host.trim(), port ) );
-			// Create the transport with a Jackson mapper
-			
-			client = new RestHighLevelClient(builder);
-
-		} catch (Exception e) {
-			throw new EntityIndexingException("Error connecting elasticsearch/opensearch:" + host + ":" + port + e.getMessage());
-		}
-	/*
-		final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-
-
-		RestClientBuilder builder = RestClient.builder( new HttpHost(host,port,"https") )
-				.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
-					@Override
-					public HttpAsyncClientBuilder customizeHttpClient(
-							HttpAsyncClientBuilder httpClientBuilder) {
-						return httpClientBuilder
-								.setDefaultCredentialsProvider(credentialsProvider);
-					}
-				});
-
-
-		try {
-			elasticClient = new RestHighLevelClient( builder );
-			RestClient client = elasticClient.getLowLevelClient();
-
-
-			System.out.println ( client.isRunning() );
-		} catch (Exception e) {
-			throw new EntityIndexingException("Error connecting elasticsearch:" + host+ ":" + port   + e.getMessage());
-		}
-
-	*/
-
-
-		this.indexingConfigFilename = configFilePath ;
-		
-
-		try {
-			indexingConfiguration = IndexingConfiguration.loadFromXml(configFilePath);
-
-			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
-
-			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices()) {
-
-				// put entity indexing config in the map for later use
-				configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
-
-				// create index if not exists, calculate and set mapping
-				createOrUpdateIndexMapping(entityIndexingConfig);
-			}
-
-			logger.info("Elastic Indexer Config File: " + indexingConfigFilename + " loaded");
-
-		} catch (Exception e) {
-			throw new EntityIndexingException("Error loading Elastic Indexer Config File: " + indexingConfigFilename + e.getMessage());
-		}
-
-		// Create indices and mappings
-
-
-
-
-
-		// JSON MAPPER
-		jsonMapper = new ObjectMapper();
-		SimpleModule module = new SimpleModule();
-		module.addSerializer(JSONEntityElastic.class, new JSONEntityElasticSerializer());
-		jsonMapper.registerModule(module);
-
-		// String serialized = mapper.writeValueAsString(myItem);
-		bulkRequest = new BulkRequest();
-		bulkRequest.timeout("2m");
-	}
 
 	private Map<String, Object> createTypeMapping(String type) {
 
