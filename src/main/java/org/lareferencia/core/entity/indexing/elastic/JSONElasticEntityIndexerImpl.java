@@ -21,11 +21,20 @@
 
 package org.lareferencia.core.entity.indexing.elastic;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.conn.ssl.TrustAllStrategy;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+
+import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
+import org.apache.http.ssl.SSLContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -50,6 +59,9 @@ import org.opensearch.client.RequestOptions;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.RestClientBuilder;
 import org.opensearch.client.RestHighLevelClient;
+import org.opensearch.client.indices.CreateIndexRequest;
+import org.opensearch.client.indices.CreateIndexResponse;
+import org.opensearch.client.indices.GetIndexRequest;
 import org.opensearch.common.xcontent.XContentType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -61,6 +73,8 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import org.springframework.context.ApplicationContext;
+
+import javax.net.ssl.SSLContext;
 
 public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
@@ -78,7 +92,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	ObjectMapper jsonMapper;
 
-	RestHighLevelClient client = null;
+	RestHighLevelClient elasticClient = null;
 
 	@Value("${elastic.host:localhost}")
 	private String host;
@@ -86,10 +100,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	@Value("${elastic.port:9200}")
 	private Integer port;
 
-	@Value("${elastic.username:nouser}")
+	@Value("${elastic.username:admin}")
 	private String username;
 
-	@Value("${elastic.password:nopassword}")
+	@Value("${elastic.password:admin}")
 	private String password;
 
 	@Value("${elastic.useSSL:false}")
@@ -110,75 +124,241 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
 	@Override
+	/**
+	 * This method will be called in the beginning of the indexing process to load the configuration and initialize the indexer
+	 */
+	public void setConfig(String configFilePath) throws EntityIndexingException {
+
+		logger.info("Loading indexing config from: " + configFilePath);
+
+		// load indexing configuration
+		try {
+			this.indexingConfigFilename = configFilePath ;
+			indexingConfiguration = IndexingConfiguration.loadFromXml(configFilePath);
+		} catch (Exception e) {
+			throw new EntityIndexingException(" Error loading indexing configuration from file: " + configFilePath + " " + e.getMessage());
+		}
+
+		logger.info("Processing Elastic Indexer Config File: " + indexingConfigFilename);
+
+		// load filters for field occurrence filtering
+		loadOccurFilters();
+
+		// build elastic client
+		elasticClient = buildElasticRestClient();
+
+		// create index mappings
+		createIndexMappings();
+
+		// create map of entity types to indexing configs
+		configsByEntityType = new HashMap<String, EntityIndexingConfig>();
+		for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices())
+			configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
+
+		// create json mapper with custom serializer for JSONEntityElastic
+		jsonMapper = new ObjectMapper();
+		SimpleModule module = new SimpleModule();
+		module.addSerializer(JSONEntityElastic.class, new JSONEntityElasticSerializer());
+		jsonMapper.registerModule(module);
+
+		// create first bulk request
+		resetBulkRequest();
+
+		logger.info("Elastic Indexer Config File: " + indexingConfigFilename + " processed successfully");
+	}
+
+
+	/**
+	 * Creates the indices and mappings for the entities to be indexed using the configuration file as a reference
+	 */
+	private void createIndexMappings() throws EntityIndexingException {
+		try {
+			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices()) {
+				// create index if not exists, calculate and set mapping
+				createOrUpdateIndexMapping(entityIndexingConfig);
+			}
+		} catch (Exception e) {
+			throw new EntityIndexingException(" Error when creating index mapping from file" + indexingConfigFilename + " :: "  + e.getMessage());
+		}
+	}
+
+	
+	private void resetBulkRequest() {
+		bulkRequest = new BulkRequest();
+		bulkRequest.timeout("5m");
+	}
+
+	/**
+	 * loads the field occurrence filters from spring context and injects them into the service
+	 */
+	private void loadOccurFilters() {
+		// Load dynamic field occurrence filters from spring context
+		try {
+			// get the service from spring context
+			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
+			if ( fieldOccurrenceFilterService != null )
+				// load the filters from spring context
+				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
+
+			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
+		} catch (Exception e) {
+			logger.warn("Error loading field occurrence filters: " + e.getMessage());
+		}
+	}
+
+	/**
+	 * Builds the elastic rest client
+	 * @throws EntityIndexingException
+	 */
+	private RestHighLevelClient buildElasticRestClient() throws EntityIndexingException {
+
+		RestHighLevelClient localClient = null;
+
+		// Build the rest client for elasticsearch/opensearch connection
+		try {
+
+			// create a credentials provider to authenticate with the given username and password
+			final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+			credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username.trim(), password.trim()));
+
+			// create a trust all strategy to accept any certificate
+			final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE).build();
+
+			//Create a client builder with the given host and port, and the ssl context and credentials provider
+			RestClientBuilder builder = RestClient.builder(new HttpHost( host.trim(), port, useSSL ? "https" : "http"))
+					.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
+						@Override
+						public HttpAsyncClientBuilder customizeHttpClient(HttpAsyncClientBuilder httpClientBuilder) {
+
+							HttpAsyncClientBuilder builder = httpClientBuilder;
+
+							// if ssl is required, we need to set the ssl context
+							if ( useSSL )
+								builder = httpClientBuilder.setSSLContext(sslContext);
+							else
+							// if ssl is not required, we just copy the original builder
+								builder = httpClientBuilder;
+
+							// if authentication is required, we need to set the credentials provider
+							if ( authenticate )
+								builder = builder.setDefaultCredentialsProvider(credentialsProvider);
+
+							return builder;
+						}
+					});
+
+			// create the client
+			localClient = new RestHighLevelClient(builder);
+
+			// check if the connection is ok
+			localClient.ping(RequestOptions.DEFAULT);
+            logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ") + (authenticate ? " using authentication" : ""));
+
+			return localClient;
+
+		} catch (Exception e) {
+		    logger.error("Error connecting elasticsearch/opensearch:" + host + ":" + port + " :: " + e.getMessage());
+			throw new EntityIndexingException(" Elastic Client creation error ");
+		}
+	}
+
+	@Override
+	/**
+	 * Indexes the given entity in elasticsearch bulk request that will be executed later
+	 * @param entity
+	 * @throws EntityIndexingException
+	 */
 	public void index(Entity entity) throws EntityIndexingException {
 
 		try {
 
+			// get the entity type
 			EntityType type = entityDataService.getEntityTypeFromId(entity.getEntityTypeId());
-
+			// get the entity indexing config for the entity type
 			EntityIndexingConfig entityIndexingConfig = configsByEntityType.get(type.getName());
 
+			// if there is no config for the entity type, throw an exception
 			if (entityIndexingConfig == null)
 				throw new EntityIndexingException(
 						"Error indexing entity: " + entity.getId() + " " + this.indexingConfigFilename
-								+ " doesn´t contains a indexing config for " + type.getName() + " EntityType");
+								+ " does not contain a indexing config for " + type.getName() + " EntityType");
 
+			// get the relations for the entity
 			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
 
+			// create the elastic entity from the entity and the relations
 			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity, relationsMap);
 
+			// get the nested entities and create the related elastic entities
 			for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
 
 				String relationName = nestedEntityConfig.getEntityRelation();
-
+				// get the relations for the nested entity
 				for (Relation relation : relationsMap.get(relationName)) {
+					//
 					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-
+					// get the relations for the related entity
 					Multimap<String, Relation> relatedEntityRelationsMap = this.getRelationMultimap(relatedEntity);
-
+					// create the related elastic entity
 					JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig, relatedEntity,
 							relatedEntityRelationsMap);
+					// add the related elastic entity to the parent entity
 					elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), relatedElasticEntity);
 				}
 			}
 
+			// index the entity
 			indexEntity(elasticEntity, entityIndexingConfig.getName());
 
 		} catch (Exception e) {
-			throw new EntityIndexingException("Indexing error. " + e.getMessage());
+			throw new EntityIndexingException("Error indexing entity: " + entity.toString() + " Error was: " + e.getMessage());
 		}
 
 	}
 
+	/**
+	 * Create the elastic entity from the entity and the relations
+	 *
+	 * @param config
+	 * @param entity
+	 * @param relationsMap
+	 * @throws EntityIndexingException
+	 */
 	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity,
 			Multimap<String, Relation> relationsMap) throws EntityIndexingException {
 
-		JSONEntityElastic result = new JSONEntityElastic();
+		// create the elastic entity
+		JSONEntityElastic jsonEntityElastic = new JSONEntityElastic();
 
 		try {
+			// set the id based on entity uuid
+			jsonEntityElastic.setId(entity.getId().toString());
 
-			result.setId(entity.getId().toString());
-
+			// set the entity type
 			if ( config.getindexEntityType() )
-				result.setType(entityDataService.getEntityTypeFromId(entity.getEntityTypeId()).getName());
+				jsonEntityElastic.setType(entityDataService.getEntityTypeFromId(entity.getEntityTypeId()).getName());
 
+			// set the entity semantic ids
 			if ( config.getIndexSemanticIds() ) {
 				for (SemanticIdentifier semanticId : entity.getSemanticIdentifiers())
-					result.addSemanticId(semanticId.getIdentifier());
+					jsonEntityElastic.addSemanticId(semanticId.getIdentifier());
 			}
 
+			// set the entity fields
 			for (FieldIndexingConfig fieldConfig : config.getIndexFields())
-				processFieldConfig(entity, relationsMap, fieldConfig, result);
-
-			// saveIEntity(result);
+				processFieldConfig(entity, relationsMap, fieldConfig, jsonEntityElastic);
 
 		} catch (Exception e) {
-			throw new EntityIndexingException("Error creating JSONElasticEntity: " + config.getName() + "::" + config.getEntityType());
+			throw new EntityIndexingException("Error creating JSONElasticEntity: " + config.getName() + " :: " + config.getEntityType() + " from entity: " + entity.getId() + " :: " + e.getMessage() );
 		}
-		return result;
+		return jsonEntityElastic;
 	}
 
 	@Override
+	/**
+	 * Flush the bulk request to the elastic client
+	 * @throws EntityIndexingException
+	 */
 	public void flush() throws EntityIndexingException {
 
 		Boolean retry = true;
@@ -188,10 +368,14 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		while ( retry ) {
 
 			try {
-				BulkResponse bulkResponse = client.bulk(bulkRequest, RequestOptions.DEFAULT);
+				BulkResponse bulkResponse = elasticClient.bulk(bulkRequest, RequestOptions.DEFAULT);
 				logger.info( "Bulk request result: " + bulkResponse.status().toString() );
 
 				retry = false;
+				
+				if ( bulkResponse.hasFailures() ) {
+				    logger.info( "Bulk request has failures: " + bulkResponse.buildFailureMessage() );
+				}
 
 			} catch (Exception e) {
 				logger.warn("retrying: " + retries + " -- Warning: " + e.getClass().toString() + " " + e.getMessage() );
@@ -206,89 +390,73 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		}
 
 		//create a new empty request
-		bulkRequest = new BulkRequest();
-		bulkRequest.timeout("2m");
+		resetBulkRequest();
 	}
 
-	@Override
-	public void setConfig(String configFilePath) throws EntityIndexingException {
 
-		// load field occurrence filter service and load filters into it
+
+	private Map<String, Object> createTypeMapping(String type) {
+
+		Map<String, Object> fieldMapping = new HashMap<String, Object>();
+		fieldMapping.put("type", type);
+
+		return fieldMapping;
+	}
+
+	private void createOrUpdateIndexMapping( EntityIndexingConfig entityIndexingConfig ) throws EntityIndexingException {
+
+		// create mapping based on entity indexing config
+		HashMap<String, Object> typesMapping = new HashMap<String, Object>();
+		HashMap<String, Object> mapping = new HashMap<String, Object>();
+		mapping.put("properties", typesMapping);
+
+		// add fields to mapping
+		for ( FieldIndexingConfig fieldConfig : entityIndexingConfig.getIndexFields() )
+			typesMapping.put(fieldConfig.getName(), createTypeMapping(fieldConfig.getType()));
+		// add id field to mapping
+		typesMapping.put("id", createTypeMapping("keyword"));
+
+		// add nested entities to mapping
+		entityIndexingConfig.getIndexNestedEntities().forEach( nestedEntityConfig -> {
+			HashMap<String, Object> nestedTypesMapping = new HashMap<String, Object>();
+			HashMap<String, Object> nestedMapping = new HashMap<String, Object>();
+			nestedMapping.put("properties", nestedTypesMapping);
+			typesMapping.put(nestedEntityConfig.getName(), nestedMapping);
+
+			// add fields to mapping
+			for ( FieldIndexingConfig fieldConfig : nestedEntityConfig.getIndexFields() )
+				nestedTypesMapping.put(fieldConfig.getName(), createTypeMapping(fieldConfig.getType()));
+
+			// add id field to mapping
+			nestedTypesMapping.put("id", createTypeMapping("keyword"));
+		});
+
+		// check if index exists
 		try {
-			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance( context );
-			if ( fieldOccurrenceFilterService != null )
-				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
+			Boolean indexExists = elasticClient.indices().exists(new GetIndexRequest(entityIndexingConfig.getName() ), RequestOptions.DEFAULT);
 
-			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
-		} catch (Exception e) {
-			logger.warn("Error loading field occurrence filters: " + e.getMessage());
+			if ( indexExists ) {
+				logger.warn("Index " + entityIndexingConfig.getName() + " already exists. Is not possible to update mapping !!!");
+
+			} else {
+				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: " + mapping.toString() + "");
+
+				// create index
+				CreateIndexRequest createIndexRequest = new CreateIndexRequest( entityIndexingConfig.getName() );
+				//createIndexRequest.settings(Settings.builder() //Specify in the settings how many shards you want in the index.
+				//		.put("index.number_of_shards", 4)
+				//		.put("index.number_of_replicas", 3)
+				//);
+
+				createIndexRequest.mapping(mapping);
+				CreateIndexResponse createIndexResponse = elasticClient.indices().create(createIndexRequest, RequestOptions.DEFAULT);
+
+				logger.info("Index " + entityIndexingConfig.getName() + " created: " + createIndexResponse.isAcknowledged() + "");
+			}
+
+		} catch (IOException e) {
+			throw new EntityIndexingException("Error trying index creation / mapping creation: " + entityIndexingConfig.getName() + " :: " + e.getMessage());
 		}
-
-
-		try {
-			RestClientBuilder builder = RestClient.builder( new HttpHost(host.trim(), port ) );
-			// Create the transport with a Jackson mapper
-			
-			client = new RestHighLevelClient(builder);
-			
-			
-		} catch (Exception e) {
-			throw new EntityIndexingException("Error connecting elasticsearch:" + host + ":" + port + e.getMessage());
-		}
-	/*
-		final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-		credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username, password));
-
-
-		RestClientBuilder builder = RestClient.builder( new HttpHost(host,port,"https") )
-				.setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
-					@Override
-					public HttpAsyncClientBuilder customizeHttpClient(
-							HttpAsyncClientBuilder httpClientBuilder) {
-						return httpClientBuilder
-								.setDefaultCredentialsProvider(credentialsProvider);
-					}
-				});
-
-
-		try {
-			elasticClient = new RestHighLevelClient( builder );
-			RestClient client = elasticClient.getLowLevelClient();
-
-
-			System.out.println ( client.isRunning() );
-		} catch (Exception e) {
-			throw new EntityIndexingException("Error connecting elasticsearch:" + host+ ":" + port   + e.getMessage());
-		}
-
-	*/
-
-
-		this.indexingConfigFilename = configFilePath ;
-		
-
-		try {
-			indexingConfiguration = IndexingConfiguration.loadFromXml(configFilePath);
-
-			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
-
-			for (EntityIndexingConfig entityIndexingConfig : indexingConfiguration.getEntityIndices())
-				configsByEntityType.put(entityIndexingConfig.getEntityType(), entityIndexingConfig);
-
-			logger.info("Nested Indexer Config File: " + indexingConfigFilename + " loaded");
-
-		} catch (Exception e) {
-			throw new EntityIndexingException("Nested Indexer Config File: " + indexingConfigFilename + e.getMessage());
-		}
-
-		jsonMapper = new ObjectMapper();
-		SimpleModule module = new SimpleModule();
-		module.addSerializer(JSONEntityElastic.class, new JSONEntityElasticSerializer());
-		jsonMapper.registerModule(module);
-
-		// String serialized = mapper.writeValueAsString(myItem);
-		bulkRequest = new BulkRequest();
-		bulkRequest.timeout("2m");
 	}
 
 	protected JSONEntityElastic createIEntity(String id, String type) {
@@ -332,7 +500,11 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	private void processFieldConfig(Entity entity, Multimap<String, Relation> relationsMap, FieldIndexingConfig config,
 			JSONEntityElastic ientity) throws EntityIndexingException {
 
+
 		String sourceFieldName = config.getSourceField();
+
+		// tratar caso de lista de campos
+
 
 		if (sourceFieldName == null)
 			throw new EntityIndexingException(

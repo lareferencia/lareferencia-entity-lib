@@ -33,12 +33,11 @@ import java.util.Map;
 @XmlRootElement
 @Setter
 public class FieldIndexingConfig {
-	
-	public enum FIELD_TYPE { STRING, TEXT } 
-	
-	String name;
-	FIELD_TYPE type = FIELD_TYPE.STRING;
 
+	static final String DEFAULT_FIELD_TYPE = "keyword";
+
+	String name;
+	String type = DEFAULT_FIELD_TYPE;
 	String sourceField;
 	String sourceSubfield;
 	String sourceRelation;
@@ -51,7 +50,7 @@ public class FieldIndexingConfig {
 	}
 	
 	@XmlAttribute(name="type")
-	public FIELD_TYPE getType() {
+	public String getType() {
 		return type;
 	}
 	

@@ -63,19 +63,9 @@
 
 
 		<dependency>
-		  <groupId>org.opensearch.client</groupId>
-		  <artifactId>opensearch-rest-client</artifactId>
-		  <version>1.2.4</version>
-		</dependency>
-		<dependency>
-		  <groupId>org.opensearch.client</groupId>
-		  <artifactId>opensearch-rest-high-level-client</artifactId>
-		  <version>1.2.4</version>
-		</dependency>
-		<dependency>
-		  <groupId>org.opensearch.client</groupId>
-		  <artifactId>opensearch-java</artifactId>
-		  <version>0.1.0</version>
+			<groupId>org.opensearch.client</groupId>
+			<artifactId>opensearch-rest-high-level-client</artifactId>
+			<version>2.5.0</version>
 		</dependency>
 
 
