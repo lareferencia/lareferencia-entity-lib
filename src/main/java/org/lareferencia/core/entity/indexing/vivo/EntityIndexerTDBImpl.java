@@ -53,7 +53,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 				graph = tdb.getGraph();				
 			
 				String directory = tdb.getPath();				
-				boolean reset = tdb.getReset();
+				boolean reset = Boolean.parseBoolean(tdb.getReset());
 				
 				// Use TDB triplestore
 				dataset = TDBFactory.createDataset(directory);

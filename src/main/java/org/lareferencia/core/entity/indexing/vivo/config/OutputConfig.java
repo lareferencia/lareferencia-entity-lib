@@ -81,7 +81,7 @@ public class OutputConfig {
 	}
 	
 	@XmlAttribute(name="reset", required = false)
-	public boolean getReset() {
-		return Boolean.parseBoolean(reset);
+	public String getReset() {
+		return reset;
 	}
 }
