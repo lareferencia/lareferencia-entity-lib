@@ -32,6 +32,7 @@ public class OutputConfig {
 	
 	String type;
 	String path;
+	String reset;
 	String name;
 	String format;
 	String url;
@@ -77,5 +78,10 @@ public class OutputConfig {
 	@XmlAttribute(name="graph", required = false)
 	public String getGraph() {
 		return graph;
+	}
+	
+	@XmlAttribute(name="reset", required = false)
+	public String getReset() {
+		return reset;
 	}
 }

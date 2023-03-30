@@ -1,10 +1,5 @@
 package org.lareferencia.core.entity.indexing.vivo;
 
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -18,10 +13,10 @@ import java.util.stream.Stream;
 import org.apache.jena.query.Dataset;
 import org.apache.jena.query.ReadWrite;
 import org.apache.jena.rdf.model.Model;
+import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.Property;
 import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
-import org.apache.jena.tdb.TDBFactory;
 import org.apache.jena.vocabulary.RDF;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -36,7 +31,6 @@ import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.indexing.vivo.config.AttributeIndexingConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.EntityIndexingConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.IndexingConfiguration;
-import org.lareferencia.core.entity.indexing.vivo.config.NamespaceConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.OutputConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.RDFTripleConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.RDFTripleConfig.TripleObject;
@@ -49,17 +43,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 
-public class EntityIndexerRDFImpl implements IEntityIndexer {
-	
-	private static Logger logger = LogManager.getLogger(EntityIndexerRDFImpl.class);
+public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	
 	@Autowired
 	EntityDataService entityDataService;
-	
-	private IndexingConfiguration indexingConfig;
-	private Map<String, EntityIndexingConfig> configsByEntityType;
-	private Map<String, String> namespaces;
-	private List<OutputConfig> outputs;
 	
 	private Map<String, String> attributesForConcat;
 	
@@ -71,8 +58,16 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 	private static final String OBJECT_PROPERTY = "objectProperty";
 	private static final String CONCATENATION = "$concat";
 	
-	private Dataset dataset;
-	private Model m;
+	protected static Logger logger = LogManager.getLogger(AbstractEntityIndexerRDF.class);
+	
+	protected Map<String, EntityIndexingConfig> configsByEntityType;
+	protected Map<String, String> namespaces;
+	protected IndexingConfiguration indexingConfig;
+	protected List<OutputConfig> outputs;
+	protected String graph;
+	protected boolean persist;
+	protected Dataset dataset;
+	protected Model m;
 
 	@Override
 	public void index(Entity entity) throws EntityIndexingException {
@@ -135,55 +130,14 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 	@Override
 	public void flush() {
 
-		//Save RDF model to one or more files
-		List<OutputConfig> files = getOutputsByType("file");
-		
-		for (OutputConfig file : files) {
-			String filePath = file.getPath() + file.getName();
-			
-			writeRDFModel(filePath, file.getFormat());
-		}
 	}
 
 	@Override
 	public void setConfig(String configFilePath) {
 		
-		try {
-			indexingConfig = IndexingConfiguration.loadFromXml(configFilePath);
-			outputs = indexingConfig.getOutputs();
-			namespaces = new HashMap<String, String>();
-			configsByEntityType = new HashMap<String, EntityIndexingConfig>();
-			
-			for (NamespaceConfig namespace : indexingConfig.getNamespaces()) {
-				namespaces.put(namespace.getPrefix(), namespace.getUrl());
-			}
-			
-			for (EntityIndexingConfig entityIndexingConfig: indexingConfig.getSourceEntities()){
-				configsByEntityType.put(entityIndexingConfig.getType(), entityIndexingConfig);
-			}
-				
-			logger.info("RDF Mapping Config File: " + configFilePath + " loaded.");
-			
-			try {
-				String directory = getOutputsByType("triplestore").get(0).getPath();
-				dataset = TDBFactory.createDataset(directory);
-				
-				//Clear the dataset in case there is data from a previous indexing
-				clearDataset();
-				
-				logger.info("TDB triplestore created at " + directory);
-			
-			} catch (Exception e) {
-				logger.error("No output of type 'triplestore' defined in the config file.");
-			}
-				
-		} catch (Exception e) {
-			logger.error("RDF Mapping Config File: " + configFilePath + e.getMessage());
-		}
 	}	
 
-	
-	private List<OutputConfig> getOutputsByType(String type) {
+	public List<OutputConfig> getOutputsByType(List<OutputConfig> outputs, String type) {
 		
 		List<OutputConfig> outputConfigs = new ArrayList<OutputConfig>();
 		
@@ -194,6 +148,16 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 		}
 		
 		return outputConfigs;
+	}
+	
+	public void setTDBModel() {
+		
+		if (graph.isBlank()) {
+			m = dataset.getDefaultModel();
+		}
+		else {
+			m = dataset.getNamedModel(graph);
+		}
 	}
 	
 	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
@@ -211,19 +175,6 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 		}
 				
 		return relationsByName;
-	}
-	
-	private void clearDataset() {
-		
-		dataset.begin(ReadWrite.WRITE);
-		
-		try {
-			m = dataset.getDefaultModel();
-			m.removeAll();
-			dataset.commit();
-		} finally { 
-			dataset.end(); 
-		}	
 	}
 	
 	private String expandElementUri (String value) {
@@ -247,9 +198,9 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 		return UUID.randomUUID().toString();
 	}
 	
-	private String normalizeName (String value) {
-		 
-		return value.replaceAll(", ", "_").replaceAll(",", "_").replaceAll(" ", "_");
+	private String createNameBasedId (String name) {
+		
+		return String.valueOf(name.hashCode());
 	}
 	
 	private String createResourceId(TripleSubject resource, String occrValue, 
@@ -262,20 +213,11 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 				: ((idSource != null && idSource.equals(TARGET_ENTITY) ? relatedEntityId 
 				: ((idSource != null && idSource.equals(NEW_ENTITY)) ? alternativeId : entityId)));
 		
-		String resourceId;
-		try {
-			resourceId = idType.equals(ENTITY_ID) ? sourceEntityId 
-					: (idType.equals(ATTR_VALUE) ? URLEncoder.encode(normalizeName(occrValue), "UTF-8") 
+		String resourceId = idType.equals(ENTITY_ID) ? sourceEntityId 
+					: (idType.equals(ATTR_VALUE) ? createNameBasedId(occrValue) 
 					: createRandomId());
 			
-			return resourceId;
-
-		} catch (UnsupportedEncodingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-			return "";
-		}
-		
+		return resourceId;	
 	}
 	
 	private void processAttributeList(List<AttributeIndexingConfig> attributeConfigs, 
@@ -377,65 +319,62 @@ public class EntityIndexerRDFImpl implements IEntityIndexer {
 								String predicateValue, String predicateType,
 								String objectValue, String objectType) {
 
-		dataset.begin(ReadWrite.WRITE);
-
-		try {
-			m = dataset.getDefaultModel();
-
-			Resource subject;
-			Property predicate;
-			RDFNode object;
-
-			//Create subject
-			subject = m.createResource(subjectValue);
-			m.add(subject, RDF.type, m.createResource(subjectType));
-
-			//Create predicate
-			predicate = m.createProperty(predicateValue);
-
-			//Create object
-			if (predicateType.equals(OBJECT_PROPERTY)) { //resource object
-				object = m.createResource(objectValue);
-				m.add(object.asResource(), RDF.type, m.createResource(objectType));
+		if (persist) {
+			// Write the triple to the TDB triplestore
+			dataset.begin(ReadWrite.WRITE);
+	
+			try {
+				setTDBModel();				
+				assembleRDFTriple(subjectValue, subjectType, predicateValue, predicateType, objectValue, objectType);
+				
+				//Commit the updates
+				dataset.commit();
+	
+			} finally { 
+				dataset.end(); 
 			}
-			else { //literal object
-				if (objectType == null) { //untyped literal
-					object = m.createLiteral(objectValue);
-				}
-				else {
-					object = m.createTypedLiteral(objectValue, objectType);
-				}
+		}
+		else {
+			// Write the triple to the in-memory RDF model
+			if (m.isClosed()) {
+				m = ModelFactory.createDefaultModel();
 			}
-
-			//Create triple
-			m.add(subject, predicate, object);
-
-			//Commit the updates
-			dataset.commit();
-
-		} finally { 
-			dataset.end(); 
+			
+			assembleRDFTriple(subjectValue, subjectType, predicateValue, predicateType, objectValue, objectType);
 		}
 	}
 	
-	private void writeRDFModel(String outputFilePath, String format) {
+	private void assembleRDFTriple(String subjectValue, String subjectType, 
+								String predicateValue, String predicateType,
+								String objectValue, String objectType) {
 		
-		dataset.begin(ReadWrite.READ);
+		Resource subject;
+		Property predicate;
+		RDFNode object;
 
-		try {
-			m = dataset.getDefaultModel();
-			
-			// Write RDF file
-			OutputStream writer = new FileOutputStream(outputFilePath);
-			m.write(writer, format);
-			writer.close();
+		//Create subject
+		subject = m.createResource(subjectValue);
+		m.add(subject, RDF.type, m.createResource(subjectType));
+
+		//Create predicate
+		predicate = m.createProperty(predicateValue);
+
+		//Create object
+		if (predicateType.equals(OBJECT_PROPERTY)) { //resource object
+			object = m.createResource(objectValue);
+			m.add(object.asResource(), RDF.type, m.createResource(objectType));
 		}
-		catch (IOException e){
-			e.printStackTrace();
+		else { //literal object
+			if (objectType == null) { //untyped literal
+				object = m.createLiteral(objectValue);
+			}
+			else {
+				object = m.createTypedLiteral(objectValue, objectType);
+			}
 		}
-		finally { 
-			dataset.end(); 
-		}
+
+		//Create triple
+		m.add(subject, predicate, object);
 	}
 
 }
