@@ -436,6 +436,11 @@ public class EntityDataService {
 	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
 		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
 	}
+
+	public void parseAndValidateEntityRelationDataFromXMLDocument(Document doc) {
+		logger.error("!!==> dryRun::parseAndValidateEntityRelationDataFromXMLDocument.:doc.getTextContent: "+doc.getTextContent());
+		
+	}
 	
 
 
