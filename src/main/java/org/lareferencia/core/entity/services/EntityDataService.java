@@ -48,7 +48,14 @@ import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.domain.SourceEntity;
 import org.lareferencia.core.entity.domain.SourceRelation;
-import org.lareferencia.core.entity.repositories.jpa.*;
+import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
+import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
+import org.lareferencia.core.entity.repositories.jpa.FieldOccurrenceRepository;
+import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
+import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
+import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
+import org.lareferencia.core.entity.repositories.jpa.SourceRelationRepository;
 import org.lareferencia.core.entity.xml.XMLEntityInstance;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLFieldValueInstance;
@@ -58,7 +65,6 @@ import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -133,6 +139,14 @@ public class EntityDataService {
 		// flush stores on destroy
 		semanticIdentifierCachedStore.flush();
 		fieldOcurrenceCachedStore.flush();
+	}
+	
+	
+	public void parseAndValidateEntityRelationDataFromXMLDocument(Document doc) {
+		logger.debug("parseAndValidateEntityRelationDataFromXMLDocument.doc: "+doc.getTextContent());
+		
+		//Todo [jbjares] Think about the design pattern application
+		//new ValidateXMLSintaxe(new ValidateContent(new ValidateQQcoisa())).validate();
 	}
 
 	@Transactional(propagation = Propagation.REQUIRED)
@@ -273,6 +287,7 @@ public class EntityDataService {
 
 
 	}
+
 
 	public LocalDateTime parseLastUpdateDate(String lastUpdateString) {
 		if (lastUpdateString != null)
@@ -436,6 +451,8 @@ public class EntityDataService {
 	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
 		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
 	}
+
+
 	
 
 
