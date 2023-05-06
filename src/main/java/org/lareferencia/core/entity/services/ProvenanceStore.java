@@ -50,6 +50,19 @@ public class ProvenanceStore  {
             return createdProvenance;
         }
     }
+    
+    public synchronized Provenance loadIfExist(String source, String record)  {
+
+        Provenance createdProvenance = new Provenance(source,record);
+
+        Optional<Provenance> optProvenance = repository.findById(createdProvenance.getId() );
+
+        if ( optProvenance.isPresent() )
+            return optProvenance.get();
+        else {
+            return null;
+        }
+    }
 
 
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {

@@ -35,6 +35,7 @@ import javax.xml.bind.JAXBContext;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 
+import org.apache.commons.lang3.exception.ExceptionUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -56,6 +57,8 @@ import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceRelationRepository;
+import org.lareferencia.core.entity.validation.handler.DocumentValitaionReport;
+import org.lareferencia.core.entity.validation.handler.SyntaxValidationHandler;
 import org.lareferencia.core.entity.xml.XMLEntityInstance;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLFieldValueInstance;
@@ -103,6 +106,14 @@ public class EntityDataService {
 	
 	@Autowired
 	private SemanticIdentifierRepository semanticIdentifierRepository;
+	
+	
+	@Autowired
+	private SyntaxValidationHandler syntaxValidationHandler;
+	
+	@Autowired
+	private DocumentValitaionReport documentValitaionReport;
+	
 
 	//@Setter
 	//@Getter
@@ -141,10 +152,41 @@ public class EntityDataService {
 		fieldOcurrenceCachedStore.flush();
 	}
 	
-	
+
+
+    private boolean processFile(Document document) {
+    	
+    	try {
+    		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
+    		profiler.messure("EntityXML Parse");
+    		simulatePersistEntityRelationDataProcess(erData);
+		//        	validatorChain.add(syntaxValidationHandler
+		//			.add(contentValidationHandler
+		//							.add(occurenceValidationHandler)));
+		//	
+		//    boolean isValid = validatorChain.validate(document);
+			Boolean isValid = syntaxValidationHandler.validate(document);
+		    if (isValid) {
+		        //TODO [jbjares] Add some log/audit loggger of validation here! Eg.: Is valida information!
+		        return true;
+		    } else {
+		        //TODO [jbjares] Add some log/audit loggger of validation here! Eg.: Is invalida information!
+				documentValitaionReport.setIsValidationStatusOk(Boolean.FALSE);
+		        return false;
+		    }
+    	}catch(Exception e) {
+    		documentValitaionReport.setIsValidationStatusOk(Boolean.FALSE);
+    		String stacktrace = ExceptionUtils.getStackTrace(e);
+    		documentValitaionReport.getReport().append(stacktrace);
+    	}
+    	return true;
+
+    }
+    
 	public void parseAndValidateEntityRelationDataFromXMLDocument(Document doc) {
 		logger.debug("parseAndValidateEntityRelationDataFromXMLDocument.doc: "+doc.getTextContent());
-		
+		processFile(doc);
+		logger.info("!!!===>>> "+documentValitaionReport.getReport().toString());
 		//Todo [jbjares] Think about the design pattern application
 		//new ValidateXMLSintaxe(new ValidateContent(new ValidateQQcoisa())).validate();
 	}
@@ -187,6 +229,111 @@ public class EntityDataService {
 		erData.isConsistent();
 
 		return erData;
+	}
+	
+	/**
+	 * Persist a XMLEntityRelation Data instance in DB Metamodel Objects
+	 * 
+	 * @param data
+	 * @throws EntityRelationException
+	 */
+	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	public void simulatePersistEntityRelationDataProcess(XMLEntityRelationData data) throws EntityRelationException {
+
+		Map<String, SourceEntity> entitiesByRef = new HashMap<String, SourceEntity>();
+	
+		if (data.getLastUpdate() == null || data.getSource() == null || data.getRecord() == null) {
+			System.out.println( data.getLastUpdate() + data.getSource() + data.getRecord() == null );
+			throw new EntityRelationException("Null field in provenacefound in xml entity definition");
+		}
+
+		Provenance provenance = provenanceStore.loadOrCreate(data.getSource(), data.getRecord());
+		
+		/**
+		if(provenance==null) {
+			//TODO [jbjares] Take some action or report about it.
+			return;
+		}
+		 **/
+		LocalDateTime lastUpdate = dateHelper.parseDate(data.getLastUpdate());
+		
+		Boolean isNew = provenance.getLastUpdate() == null;
+		Boolean isUpdate = provenance.getLastUpdate() != null && provenance.getLastUpdate().isBefore(lastUpdate);
+		
+		if ( !isNew && !isUpdate )
+			//TODO [jbjares] Take some action or report about it.
+			return;
+
+		if ( isUpdate ) {
+			// logically delete existing source entities because it will be created again
+			//TODO [jbjares] Take some action or report about it.
+			sourceEntityRepository.logicalDeleteByProvenanceId(provenance.getId());
+		}
+				
+		// entities
+		for (XMLEntityInstance xmlEntity : data.getEntities()) {
+
+			EntityType entityType = getEntityTypeFromName(xmlEntity.getType());
+
+			profiler.messure(xmlEntity.getType() + " Source Entity", true);
+
+			SourceEntity sourceEntity = new SourceEntity(entityType, provenance);
+
+			for (XMLFieldValueInstance field : xmlEntity.getFields())
+				addFieldOccurrenceFromXMLFieldInstance(entityType, sourceEntity, field);
+
+			for (String semanticId : xmlEntity.getSemanticIdentifiers())
+				if (isMinimalViableSemanticIdentifier(semanticId))
+					sourceEntity.addSemanticIdentifier( semanticIdentifierCachedStore.loadOrCreate(semanticId) );
+	
+			profiler.messure("Persist Source Entity");
+			
+			// find existing entity o create a new one
+			Entity entity = findOrCreateFinalEntity(sourceEntity);
+			
+			// set that entity as final entity for this source entity
+			sourceEntity.setFinalEntity(entity);
+			//sourceEntityRepository.updateFinalEntityReference(sourceEntity.getId(), entity.getId());
+			
+			profiler.messure("Find or Create Final Entity");
+			
+			// save the source entity 
+			//sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
+			
+			// copy semantic ids from source to entity
+			//sourceEntityRepository.copySemanticIdentifiersFromSourceEntityToEntity(sourceEntity.getId(), entity.getId());
+						
+			profiler.messure("Save source entity");
+
+			
+			entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
+		}
+
+		// relations
+		for (XMLRelationInstance xmlRelation : data.getRelations()) {
+
+			// Relation Type
+			RelationType relationType = getRelationTypeFromName(xmlRelation.getType());
+
+			SourceRelation sourceRelation = createRelationFromXMLEntityInstance(entitiesByRef, relationType, xmlRelation);	
+			
+			// for each relation define or update the occurrences
+			for (XMLFieldValueInstance field : xmlRelation.getFields())
+				addFieldOccurrenceFromXMLFieldInstance(relationType, sourceRelation, field);
+	
+			sourceRelationRepository.save(sourceRelation);
+			
+			//Relation relation = new Relation(relationType, sourceRelation.getFromEntity().getFinalEntity(), sourceRelation.getToEntity().getFinalEntity());
+			//relationRepository.saveAndFlush(relation);
+
+			
+			profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
+
+		}
+		
+		// finally update provenance lastUpdate
+		
+		//provenanceStore.setLastUpdate(provenance,lastUpdate);
 	}
 
 	/**
