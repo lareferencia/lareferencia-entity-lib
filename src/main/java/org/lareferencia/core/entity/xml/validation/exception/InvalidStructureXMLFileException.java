@@ -1,0 +1,34 @@
+package org.lareferencia.core.entity.xml.validation.exception;
+
+import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportEnum;
+
+public class InvalidStructureXMLFileException extends EntityXMLValidationException {
+	
+
+	private static final String DEFAULT_MESSAGE = DocumentValitaionReportEnum.INVALID_ESTRUCTURAL_ISSUE.getDescription();
+	
+	
+	public InvalidStructureXMLFileException() {
+		super(DEFAULT_MESSAGE);
+	}
+
+	public InvalidStructureXMLFileException(String message, Throwable cause) {
+		super(message, cause);
+	}
+
+	public InvalidStructureXMLFileException(Throwable cause) {
+		super(cause);
+	}
+
+	public InvalidStructureXMLFileException(String message) {
+		super(DEFAULT_MESSAGE.concat(message));
+	}
+	public InvalidStructureXMLFileException(String message,String extraMessage,Throwable cause) {
+		super(DEFAULT_MESSAGE.concat(extraMessage), cause);
+	}
+	
+	
+	private static final long serialVersionUID = 3667116253070316974L;
+	
+
+}

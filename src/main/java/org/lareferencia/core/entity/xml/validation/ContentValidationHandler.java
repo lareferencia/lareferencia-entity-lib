@@ -1,12 +1,12 @@
-package org.lareferencia.core.entity.validation.handler;
+package org.lareferencia.core.entity.xml.validation;
 
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 
 @Component
-@Qualifier("occurenceValidationHandler")
-public class OccurenceValidationHandler extends DocumentValitaionHandler{
+@Qualifier("contentValidationHandler")
+public class ContentValidationHandler extends DocumentValitaionHandler{
 
     protected boolean doValidation(Document document) {
         boolean isValid = true;

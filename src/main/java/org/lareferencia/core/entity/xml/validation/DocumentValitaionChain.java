@@ -1,13 +1,13 @@
-package org.lareferencia.core.entity.validation.handler;
+package org.lareferencia.core.entity.xml.validation;
+
+
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.w3c.dom.Document;
 
-public abstract class DocumentValitaionHandler implements IDocumentValitaionHandler {
+public abstract class DocumentValitaionChain implements IDocumentValitaionHandler {
 
 	@Autowired(required = false)
-	@Qualifier("any")
 	private IDocumentValitaionHandler next;
 
 	public IDocumentValitaionHandler add(IDocumentValitaionHandler next) {

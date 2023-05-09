@@ -1,4 +1,4 @@
-package org.lareferencia.core.entity.validation.handler;
+package org.lareferencia.core.entity.xml.validation;
 
 import org.w3c.dom.Document;
 
