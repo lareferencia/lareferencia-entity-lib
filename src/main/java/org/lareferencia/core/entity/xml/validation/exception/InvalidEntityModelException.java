@@ -21,10 +21,7 @@ public class InvalidEntityModelException extends Exception{
 	}
 
 	public InvalidEntityModelException(String message) {
-		super(DEFAULT_MESSAGE.concat(message));
-	}
-	public InvalidEntityModelException(String message,String extraMessage,Throwable cause) {
-		super(DEFAULT_MESSAGE.concat(extraMessage), cause);
+		super(DEFAULT_MESSAGE+message);
 	}
 
 }

@@ -21,10 +21,7 @@ public class InvalidStructureXMLFileException extends Exception{
 	}
 
 	public InvalidStructureXMLFileException(String message) {
-		super(DEFAULT_MESSAGE.concat(message));
-	}
-	public InvalidStructureXMLFileException(String message,String extraMessage,Throwable cause) {
-		super(DEFAULT_MESSAGE.concat(extraMessage), cause);
+		super(DEFAULT_MESSAGE+message);
 	}
 	
 	

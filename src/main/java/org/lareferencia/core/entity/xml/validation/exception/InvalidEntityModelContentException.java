@@ -21,7 +21,7 @@ public class InvalidEntityModelContentException extends Exception{
 	}
 
 	public InvalidEntityModelContentException(String message) {
-		super(DEFAULT_MESSAGE);
+		super(DEFAULT_MESSAGE+message);
 	}
 
 

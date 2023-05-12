@@ -21,10 +21,6 @@ public class InvalidModelXMLFileException extends Exception{
 	}
 
 	public InvalidModelXMLFileException(String message) {
-		super(DEFAULT_MESSAGE.concat(message));
+		super(DEFAULT_MESSAGE+message);
 	}
-	public InvalidModelXMLFileException(String message,String extraMessage,Throwable cause) {
-		super(DEFAULT_MESSAGE.concat(extraMessage), cause);
-	}
-
 }

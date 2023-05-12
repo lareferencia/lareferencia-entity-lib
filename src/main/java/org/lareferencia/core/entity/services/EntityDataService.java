@@ -66,7 +66,7 @@ import org.lareferencia.core.entity.xml.validation.exception.InvalidEntityModelC
 import org.lareferencia.core.entity.xml.validation.exception.InvalidEntityModelException;
 import org.lareferencia.core.entity.xml.validation.exception.InvalidModelXMLFileException;
 import org.lareferencia.core.entity.xml.validation.exception.InvalidStructureXMLFileException;
-import org.lareferencia.core.entity.xml.validation.exception.LoadDataValidationException;
+import org.lareferencia.core.entity.xml.validation.exception.LoadDataValidationGenericException;
 import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReport;
 import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportEnum;
 import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportTO;
@@ -174,61 +174,71 @@ public class EntityDataService {
 		if (e instanceof InvalidEntityModelContentException) {
 			handleInvalidEntityModelContentException((InvalidEntityModelContentException) e, report);
 		}
-		if (e instanceof LoadDataValidationException) {
-			handleGenericErrorValidationException(e, report);
-		}
 		if (e instanceof EntityRelationException) {
-			handleGenericErrorValidationException(e, report);
+			handleInvalidEntityRelationException((EntityRelationException) e, report);
 		}
+		if (e instanceof LoadDataValidationGenericException) {
+			handleLoadDataValidationGenericException((LoadDataValidationGenericException)e, report);
+		}
+
 	}
+
+
+
+
 
 	private void simulateParseAndPersistEntityRelationDataFromXMLDocument(Document doc,
 			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument)
-			throws LoadDataValidationException, InvalidEntityModelContentException, InvalidEntityModelException,
+			throws LoadDataValidationGenericException, InvalidEntityModelContentException, InvalidEntityModelException,
 			InvalidStructureXMLFileException, InvalidModelXMLFileException, EntityRelationException {
 		profiler.messure("Entity Model XML File validation.");
-		XMLEntityRelationData erData = null;
-
-		erData = simulateParseEntityRelationDataFromXmlDocument(doc);
+		XMLEntityRelationData erData = simulateParseEntityRelationDataFromXmlDocument(doc);
 		simulatePersistEntityRelationDataProcess(erData);
-
+	}
+	
+	private void handleLoadDataValidationGenericException(LoadDataValidationGenericException ex,
+			DocumentValitaionReportTO report) {
+		report.setStatus(DocumentValitaionReportEnum.GENERIC_ERROR);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getGenericErroFilesList().add(report);
 	}
 
+	private void handleInvalidEntityRelationException(EntityRelationException ex, DocumentValitaionReportTO report) {
+		report
+		.setStatus(DocumentValitaionReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getInvalidModelFilesList().add(report);
+	}
+	
 	private void handleInvalidEntityModelContentException(InvalidEntityModelContentException ex,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument) {
-		simulateParseEntityRelationDataFromXmlDocument.setStatus(DocumentValitaionReportEnum.INVALID_CONTENT_ISSUE);
-		simulateParseEntityRelationDataFromXmlDocument.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidContentDataList().add(simulateParseEntityRelationDataFromXmlDocument);
+			DocumentValitaionReportTO report) {
+		report.setStatus(DocumentValitaionReportEnum.INVALID_CONTENT_ISSUE);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getInvalidContentDataList().add(report);
 	}
 
 	private void handleInvalidEntityModelException(InvalidEntityModelException ex,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument) {
-		simulateParseEntityRelationDataFromXmlDocument
+			DocumentValitaionReportTO report) {
+		report
 				.setStatus(DocumentValitaionReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE);
-		simulateParseEntityRelationDataFromXmlDocument.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidModelFilesList().add(simulateParseEntityRelationDataFromXmlDocument);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getInvalidModelFilesList().add(report);
 	}
 
 	private void handleInvalidModelXMLFileException(InvalidModelXMLFileException ex,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument) {
-		simulateParseEntityRelationDataFromXmlDocument
+			DocumentValitaionReportTO report) {
+		report
 				.setStatus(DocumentValitaionReportEnum.INVALID_MODEL_INTEGRITY_ISSUE);
-		simulateParseEntityRelationDataFromXmlDocument.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidModelFilesList().add(simulateParseEntityRelationDataFromXmlDocument);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getInvalidModelFilesList().add(report);
 	}
 
-	private void handleGenericErrorValidationException(Exception ex,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument) {
-		simulateParseEntityRelationDataFromXmlDocument.setStatus(DocumentValitaionReportEnum.GENERIC_ERROR);
-		simulateParseEntityRelationDataFromXmlDocument.setDetails(ex.getMessage());
-		documentValitaionReport.getGenericErroFilesList().add(simulateParseEntityRelationDataFromXmlDocument);
-	}
 
 	private void handleInvalidStructureXMLFileException(InvalidStructureXMLFileException ex,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument) {
-		simulateParseEntityRelationDataFromXmlDocument.setStatus(DocumentValitaionReportEnum.INVALID_ESTRUCTURAL_ISSUE);
-		simulateParseEntityRelationDataFromXmlDocument.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidStructuredXMLFilesList().add(simulateParseEntityRelationDataFromXmlDocument);
+			DocumentValitaionReportTO report) {
+		report.setStatus(DocumentValitaionReportEnum.INVALID_ESTRUCTURAL_ISSUE);
+		report.setDetails(ex.getMessage());
+		documentValitaionReport.getInvalidStructuredXMLFilesList().add(report);
 	}
 
 	/**
@@ -238,12 +248,12 @@ public class EntityDataService {
 	 * @param documentValitaionReportTO
 	 * @return
 	 * @throws EntityRelationException
-	 * @throws LoadDataValidationException
+	 * @throws LoadDataValidationGenericException
 	 * @throws InvalidStructureXMLFileException
 	 * @throws InvalidModelXMLFileException
 	 */
 	public XMLEntityRelationData simulateParseEntityRelationDataFromXmlDocument(Document document)
-			throws LoadDataValidationException, InvalidStructureXMLFileException, InvalidModelXMLFileException {
+			throws LoadDataValidationGenericException, InvalidStructureXMLFileException, InvalidModelXMLFileException {
 
 		XMLEntityRelationData erData = new XMLEntityRelationData();
 
@@ -288,7 +298,7 @@ public class EntityDataService {
 	 * @throws EntityRelationException
 	 */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void simulatePersistEntityRelationDataProcess(XMLEntityRelationData data) throws LoadDataValidationException,
+	public void simulatePersistEntityRelationDataProcess(XMLEntityRelationData data) throws LoadDataValidationGenericException,
 			InvalidEntityModelContentException, InvalidEntityModelException, EntityRelationException {
 
 		Map<String, SourceEntity> entitiesByRef = new HashMap<String, SourceEntity>();
@@ -311,13 +321,13 @@ public class EntityDataService {
 		LocalDateTime lastUpdate = null;
 		try {
 			lastUpdate = dateHelper.parseDate(data.getLastUpdate());
-			if (isValidLocalDateTime(lastUpdate)) {
+			if (!dateHelper.isValidLocalDateTime(lastUpdate)) {
 				throw new InvalidEntityModelContentException(
-						"The LastUpdate field is not valid for the given XML entity definition.");
+						"The LastUpdate field is not valid. lastUpdate: " + lastUpdate);
 			}
 		} catch (Exception e) {
 			throw new InvalidEntityModelContentException(
-					"The LastUpdate field is not valid: "+e.getMessage());
+					"The LastUpdate field is not valid. lastUpdate: " + lastUpdate);
 		}
 
 		Integer entitiesCount = 0;
@@ -665,15 +675,6 @@ public class EntityDataService {
 
 	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
 		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
-	}
-
-	public boolean isValidLocalDateTime(LocalDateTime dateTime) {
-		try {
-			dateTime.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
-			return true;
-		} catch (DateTimeException e) {
-			return false;
-		}
 	}
 
 }
