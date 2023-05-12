@@ -2,7 +2,7 @@ package org.lareferencia.core.entity.xml.validation.exception;
 
 import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportEnum;
 
-public class InvalidModelXMLFileException extends EntityXMLValidationException {
+public class InvalidModelXMLFileException extends Exception{
 	
 	private static final long serialVersionUID = -4313080671067089014L;
 	

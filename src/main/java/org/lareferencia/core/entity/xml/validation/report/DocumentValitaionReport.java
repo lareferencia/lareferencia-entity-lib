@@ -17,6 +17,10 @@ public class DocumentValitaionReport {
 	
 	@Getter
 	@Setter
+	private Long totalGenericErrorFiles;
+	
+	@Getter
+	@Setter
 	private Long totalValidFiles;
 	
 	@Getter
@@ -26,22 +30,24 @@ public class DocumentValitaionReport {
 	@Getter
 	@Setter
 	private Long totalInvalidModelFiles;
-
-	@Getter
-	@Setter
-	private List<DocumentValitaionReportTO> validFilesList = new ArrayList<>();
 	
 	@Getter
 	@Setter
-	private List<DocumentValitaionReportTO> invalidaStructuredXMLFilesList = new ArrayList<>();
+	private Long totalInvalidContentData;
+
+	
+	@Getter
+	@Setter
+	private List<DocumentValitaionReportTO> invalidStructuredXMLFilesList = new ArrayList<>();
+	
+	@Getter
+	@Setter
+	private List<DocumentValitaionReportTO> invalidContentDataList = new ArrayList<>();
 	
 	@Getter
 	@Setter
 	private List<DocumentValitaionReportTO> invalidModelFilesList = new ArrayList<>();
 	
-	@Getter
-	@Setter
-	private List<DocumentValitaionReportTO> processedFilesList = new ArrayList<>();
 	
 	@Getter
 	@Setter
