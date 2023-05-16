@@ -115,9 +115,10 @@ public class EntityDataService {
 	// @Getter
 	// private EntityLRUCache entityCache = null;
 
+	@Autowired
 	@Getter
 	@Setter
-	private DocumentValitaionReport documentValitaionReport = new DocumentValitaionReport();
+	private DocumentValitaionReport documentValitaionReport;
 
 	@Getter
 	@Setter
