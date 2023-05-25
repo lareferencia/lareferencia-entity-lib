@@ -30,7 +30,7 @@ public class EntityLoadingMonitorService {
 	
 	private static final String JSON = ".json";
 	private static final String DD_MM_YYYY_HH_MM_SS = "dd_MM_yyyy_HH_mm_ss";
-	private static final String DRY_RUN_REPORT = "dry-run-report_";
+	private static final String DRY_RUN_REPORT = "entity-report_";
 	
 	//Loading flag
 	@Getter
