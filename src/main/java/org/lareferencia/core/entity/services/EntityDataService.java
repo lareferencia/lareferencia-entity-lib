@@ -56,13 +56,7 @@ import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceRelationRepository;
-import org.lareferencia.core.entity.services.exception.InvalidEntityModelContentException;
-import org.lareferencia.core.entity.services.exception.InvalidEntityModelException;
-import org.lareferencia.core.entity.services.exception.InvalidModelXMLFileException;
-import org.lareferencia.core.entity.services.exception.InvalidStructureXMLFileException;
-import org.lareferencia.core.entity.services.exception.LoadDataValidationGenericException;
-import org.lareferencia.core.entity.services.to.EntityValitaionSummaryReportEnum;
-import org.lareferencia.core.entity.services.to.EntityValitaionTO;
+import org.lareferencia.core.entity.services.exception.EntitiyRelationXMLLoadingException;
 import org.lareferencia.core.entity.xml.XMLEntityInstance;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLFieldValueInstance;
@@ -116,11 +110,6 @@ public class EntityDataService {
 
 	@Getter
 	@Setter
-	@Autowired
-	private EntityLoadingMonitorService entityLoadingMonitorService;
-
-	@Getter
-	@Setter
 	private Profiler profiler = new Profiler(false, "");
 
 	ConcurrentCachedNamedStore<Long, EntityType, EntityTypeRepository> entityTypeStore;
@@ -151,108 +140,30 @@ public class EntityDataService {
 		fieldOcurrenceCachedStore.flush();
 	}
 
-	public void validateXMLEntityModelParseBeforePersist(Document doc, String filePath) {
-		EntityValitaionTO entityValitaionTO = new EntityValitaionTO();
-		entityValitaionTO.setFile(filePath);
-		entityLoadingMonitorService.setIsLoadingProcessInProgress(Boolean.TRUE);
-		try {
-			simulateParseAndPersistEntityRelationDataFromXMLDocument(doc);
-		} catch (Exception e) {
-			handleValidationException(e,entityValitaionTO);
-		}finally {
-			entityLoadingMonitorService.updateAllSummaryAndReportData();
-		}
-	}
-
-	private void handleValidationException(Exception e, EntityValitaionTO entityValitaionTO) {
-		if (e instanceof InvalidModelXMLFileException) {
-			handleInvalidModelXMLFileException((InvalidModelXMLFileException) e, entityValitaionTO);
-		}
-		if (e instanceof InvalidStructureXMLFileException) {
-			handleInvalidStructureXMLFileException((InvalidStructureXMLFileException) e, entityValitaionTO);
-		}
-		if (e instanceof InvalidEntityModelException) {
-			handleInvalidEntityModelException((InvalidEntityModelException) e, entityValitaionTO);
-		}
-		if (e instanceof InvalidEntityModelContentException) {
-			handleInvalidEntityModelContentException((InvalidEntityModelContentException) e, entityValitaionTO);
-		}
-		if (e instanceof EntityRelationException) {
-			handleInvalidEntityRelationException((EntityRelationException) e, entityValitaionTO);
-		}
-		if (e instanceof LoadDataValidationGenericException) {
-			handleLoadDataValidationGenericException((LoadDataValidationGenericException)e, entityValitaionTO);
-		}
-
-	}
-
-
-
-
-
-	private void simulateParseAndPersistEntityRelationDataFromXMLDocument(Document doc)
-			throws LoadDataValidationGenericException, InvalidEntityModelContentException, InvalidEntityModelException,
-			InvalidStructureXMLFileException, InvalidModelXMLFileException, EntityRelationException {
-		profiler.messure("Entity Model XML File validation.");
-		XMLEntityRelationData erData = simulateParseEntityRelationDataFromXmlDocument(doc);
-		simulatePersistEntityRelationDataProcess(erData);
-	}
 	
-	private void handleLoadDataValidationGenericException(LoadDataValidationGenericException ex,
-			EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.GENERIC_ERROR.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getGenericErroFilesList().add(report);
-	}
+	/**
+	 * Load EntityRelation Data instance from XML Document and persist it
+	 * 
+	 * @param document XML Document
+	 * @param dryRun if true, no data will be persisted
+	 * @throws Exception
+	 */
+	@Transactional(propagation = Propagation.REQUIRED)
+	public EntityLoadingStats parseAndPersistEntityRelationDataFromXMLDocument(Document document, Boolean dryRun) throws Exception {
+		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
+		profiler.messure("EntityXML Parse");
+		return persistEntityRelationData(erData, dryRun);
 
-	private void handleInvalidEntityRelationException(EntityRelationException ex, EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
-	}
-	
-	private void handleInvalidEntityModelContentException(InvalidEntityModelContentException ex,
-			EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_CONTENT_ISSUE.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getInvalidContentDataList().add(report);
-	}
-
-	private void handleInvalidEntityModelException(InvalidEntityModelException ex,
-			EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
-	}
-
-	private void handleInvalidModelXMLFileException(InvalidModelXMLFileException ex,
-			EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_MODEL_INTEGRITY_ISSUE.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
-	}
-
-
-	private void handleInvalidStructureXMLFileException(InvalidStructureXMLFileException ex,
-			EntityValitaionTO report) {
-		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ESTRUCTURAL_ISSUE.getDescription());
-		report.setDetails(ex.getMessage());
-		entityLoadingMonitorService.getInvalidStructuredXMLFilesList().add(report);
 	}
 
 	/**
 	 * Load EntityRelation Data instance from XML Document
 	 * 
 	 * @param document
-	 * @param documentValitaionReportTO
 	 * @return
-	 * @throws EntityRelationException
-	 * @throws LoadDataValidationGenericException
-	 * @throws InvalidStructureXMLFileException
-	 * @throws InvalidModelXMLFileException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
-	public XMLEntityRelationData simulateParseEntityRelationDataFromXmlDocument(Document document)
-			throws LoadDataValidationGenericException, InvalidStructureXMLFileException, InvalidModelXMLFileException {
+	public XMLEntityRelationData parseEntityRelationDataFromXmlDocument(Document document) throws Exception {
 
 		XMLEntityRelationData erData = new XMLEntityRelationData();
 
@@ -266,189 +177,82 @@ public class EntityDataService {
 			erData = (XMLEntityRelationData) unmarshaller.unmarshal(document);
 
 		} catch (Exception e) {
-			throw new InvalidStructureXMLFileException(
-					"Error parsing XML File to Entity-Relation data: " + e.getMessage());
+			throw new EntitiyRelationXMLLoadingException (
+					"Error parsing XML File to Entity-Relation data :: " + e.getMessage());		
 		}
 
+		// check consistency
 		try {
 			erData.isConsistent();
 		} catch (Exception imfex) {
-			throw new InvalidModelXMLFileException(imfex.getMessage());
+			throw new EntitiyRelationXMLLoadingException( "Entity-Relation data is no consistent :: " + imfex.getMessage());
 		}
 
 		return erData;
-	}
-
-	@Transactional(propagation = Propagation.REQUIRED)
-	public void parseAndPersistEntityRelationDataFromXMLDocument(Document document) throws EntityRelationException {
-		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
-		profiler.messure("EntityXML Parse");
-
-		persistEntityRelationData(erData);
-
 	}
 
 	/**
 	 * Persist a XMLEntityRelation Data instance in DB Metamodel Objects
 	 * 
 	 * @param data
-	 * @throws InvalidEntityModelContentException
-	 * @throws InvalidEntityModelException
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void simulatePersistEntityRelationDataProcess(XMLEntityRelationData data) throws LoadDataValidationGenericException,
-			InvalidEntityModelContentException, InvalidEntityModelException, EntityRelationException {
+	public EntityLoadingStats persistEntityRelationData(XMLEntityRelationData data, Boolean dryRun) throws Exception {
+
+		EntityLoadingStats stats = new EntityLoadingStats();
 
 		Map<String, SourceEntity> entitiesByRef = new HashMap<String, SourceEntity>();
 
 		if (data.getLastUpdate() == null) {
-			throw new InvalidEntityModelContentException(
-					"The LastUpdate field is Null on provenace for the given XML entity definition.");
+			throw new EntitiyRelationXMLLoadingException(
+					"The LastUpdate field is Null on provenace for the given XML entity definition :: " + data.getLastUpdate());
 		}
 		if (data.getSource() == null) {
-			throw new InvalidEntityModelContentException(
-					"The Source field is Null on provenace for the given XML entity definition.");
+			throw new EntitiyRelationXMLLoadingException(
+					"The Source field is Null on provenace for the given XML entity definition :: " + data.getSource());
 		}
 		if (data.getRecord() == null) {
-			throw new InvalidEntityModelContentException(
-					"The Record field is Null on provenace for the given XML entity definition.");
+			throw new EntitiyRelationXMLLoadingException(
+					"The Record field is Null on provenace for the given XML entity definition :: " + data.getRecord());
 		}
 
-		Provenance provenance = new Provenance(data.getSource(), data.getRecord());
+		// provenance
+		Provenance provenance = null;		
+		if (dryRun) // if dry run, do not persist provenance 
+			provenance = new Provenance(data.getSource(), data.getRecord());
+		else // if not dry run, load or create provenance
+			provenance = provenanceStore.loadOrCreate(data.getSource(), data.getRecord());
 
+
+		// last update
 		LocalDateTime lastUpdate = null;
 		try {
 			lastUpdate = dateHelper.parseDate(data.getLastUpdate());
 			if (!dateHelper.isValidLocalDateTime(lastUpdate)) {
-				throw new InvalidEntityModelContentException(
-						"The LastUpdate field is not valid. lastUpdate: " + lastUpdate);
+				throw new EntitiyRelationXMLLoadingException(
+						"The LastUpdate field is not valid :: lastUpdate: " + lastUpdate);
 			}
 		} catch (Exception e) {
-			throw new InvalidEntityModelContentException(
-					"The LastUpdate field is not valid. lastUpdate: " + lastUpdate);
+			throw new EntitiyRelationXMLLoadingException(
+					"The LastUpdate field is not valid :: lastUpdate: " + lastUpdate);
 		}
 
-		Integer entitiesCount = 0;
-		// entities
-		for (XMLEntityInstance xmlEntity : data.getEntities()) {
-			entitiesCount++;
-			EntityType entityType = getEntityTypeFromName(xmlEntity.getType());
 
-			profiler.messure(xmlEntity.getType() + " Source Entity", true);
-
-			SourceEntity sourceEntity = new SourceEntity(entityType, provenance);
-
-			for (XMLFieldValueInstance field : xmlEntity.getFields()) {
-				addFieldOccurrenceFromXMLFieldInstance(entityType, sourceEntity, field);
-			}
-
-			Boolean isAtLeastOneMinimalViableSemanticIdentifier = Boolean.FALSE;
-			for (String semanticId : xmlEntity.getSemanticIdentifiers()) {
-				if (isMinimalViableSemanticIdentifier(semanticId)) {
-					isAtLeastOneMinimalViableSemanticIdentifier = Boolean.TRUE;
-				}
-			}
-			if (!isAtLeastOneMinimalViableSemanticIdentifier) {
-				throw new InvalidEntityModelException(
-						"The provided XML Entity file does not contains at least one semanticIdentifier obrigatory field for The Entity type: "
-								+ xmlEntity.getType());
-			}
-
-			entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
-		}
-
-		Integer relationsCount = 0;
-		// relations
-		for (XMLRelationInstance xmlRelation : data.getRelations()) {
-			relationsCount++;
-			// Relation Type
-			RelationType relationType = getRelationTypeFromName(xmlRelation.getType());
-
-			SourceRelation sourceRelation = createRelationFromXMLEntityInstance(entitiesByRef, relationType,
-					xmlRelation);
-
-			// for each relation define or update the occurrences
-			for (XMLFieldValueInstance field : xmlRelation.getFields()) {
-				addFieldOccurrenceFromXMLFieldInstance(relationType, sourceRelation, field);
-			}
-
-			profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
-
-		}
-
-		if (entitiesCount >= 2 && relationsCount < 1) {
-			throw new InvalidEntityModelException(
-					"The provided XML Entity file does not contains relations to correlate the defined entities.");
-		}
-
-	}
-
-	/**
-	 * Load EntityRelation Data instance from XML Document
-	 * 
-	 * @param document
-	 * @return
-	 * @throws EntityRelationException
-	 */
-	public XMLEntityRelationData parseEntityRelationDataFromXmlDocument(Document document)
-			throws EntityRelationException {
-
-		XMLEntityRelationData erData = new XMLEntityRelationData();
-
-		try {
-			JAXBContext context = JAXBContext.newInstance(erData.getClass());
-			Marshaller marshaller = context.createMarshaller();
-			marshaller.setProperty(Marshaller.JAXB_FORMATTED_OUTPUT, Boolean.TRUE);
-
-			Unmarshaller unmarshaller = context.createUnmarshaller();
-
-			erData = (XMLEntityRelationData) unmarshaller.unmarshal(document);
-
-		} catch (Exception e) {
-			throw new EntityRelationException("Error loading Entity-Relation data from XML Document " + e.getMessage());
-		}
-
-		// check consistency
-		erData.isConsistent();
-
-		return erData;
-	}
-
-	/**
-	 * Persist a XMLEntityRelation Data instance in DB Metamodel Objects
-	 * 
-	 * @param data
-	 * @throws EntityRelationException
-	 */
-	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void persistEntityRelationData(XMLEntityRelationData data) throws EntityRelationException {
-
-		Map<String, SourceEntity> entitiesByRef = new HashMap<String, SourceEntity>();
-
-		if (data.getLastUpdate() == null || data.getSource() == null || data.getRecord() == null) {
-			System.out.println(data.getLastUpdate() + data.getSource() + data.getRecord() == null);
-			throw new EntityRelationException("Null field in provenacefound in xml entity definition");
-		}
-
-		Provenance provenance = provenanceStore.loadOrCreate(data.getSource(), data.getRecord());
-
-		LocalDateTime lastUpdate = dateHelper.parseDate(data.getLastUpdate());
-
+		// check if the provenance is new or update
 		Boolean isNew = provenance.getLastUpdate() == null;
 		Boolean isUpdate = provenance.getLastUpdate() != null && provenance.getLastUpdate().isBefore(lastUpdate);
 
-		if (!isNew && !isUpdate)
-			return;
+		// if is not new and is not update, do nothing
+		if (!isNew && !isUpdate) return stats;
 
-		if (isUpdate) {
-			// logically delete existing source entities because it will be created again
+		if (isUpdate) // logically delete existing source entities related with this provenance because they will be replaced
 			sourceEntityRepository.logicalDeleteByProvenanceId(provenance.getId());
-		}
-
-		// entities
+		
+		// iterate over entities in the XML
 		for (XMLEntityInstance xmlEntity : data.getEntities()) {
 
+			// TODO: throw exception if the entity type is not defined in the model
 			EntityType entityType = getEntityTypeFromName(xmlEntity.getType());
 
 			profiler.messure(xmlEntity.getType() + " Source Entity", true);
@@ -458,24 +262,40 @@ public class EntityDataService {
 			for (XMLFieldValueInstance field : xmlEntity.getFields())
 				addFieldOccurrenceFromXMLFieldInstance(entityType, sourceEntity, field);
 
+			// add semantic identifiers 
+			Boolean isAtLeastOneMinimalViableSemanticIdentifier = false;	
 			for (String semanticId : xmlEntity.getSemanticIdentifiers())
-				if (isMinimalViableSemanticIdentifier(semanticId))
-					sourceEntity.addSemanticIdentifier(semanticIdentifierCachedStore.loadOrCreate(semanticId));
+				if (isMinimalViableSemanticIdentifier(semanticId)) {
+					if (!dryRun) // if not dry run, load or create semantic identifier
+						sourceEntity.addSemanticIdentifier(semanticIdentifierCachedStore.loadOrCreate(semanticId));
+					isAtLeastOneMinimalViableSemanticIdentifier = true;
+				}
+			
+			// if there is no semantic identifier, throw exception
+			if (!isAtLeastOneMinimalViableSemanticIdentifier) {
+				throw new EntitiyRelationXMLLoadingException("The provided XML Entity does not contain at least one semanticIdentifier ::  Entity: " + xmlEntity.getRef());
+			}
 
-			profiler.messure("Persist Source Entity");
-
+			profiler.messure("Find or Create Final Entity");		
 			// find existing entity o create a new one
 			Entity entity = findOrCreateFinalEntity(sourceEntity);
-
+			if (entity.isNew()) 
+				stats.incrementEntities(); // increment entities stats because the entity is new
+			else	
+				stats.incrementDuplicationsFound(); // increment duplications found stats because the entity already exists
+		
 			// set that entity as final entity for this source entity
 			sourceEntity.setFinalEntity(entity);
 			// sourceEntityRepository.updateFinalEntityReference(sourceEntity.getId(),
 			// entity.getId());
 
-			profiler.messure("Find or Create Final Entity");
-
 			// save the source entity
-			sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
+			profiler.messure("Persist Source Entity");
+			if (!dryRun) // if not dry run, save source entity
+				sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
+
+			stats.incrementSourceEntities(); // increment stats
+
 
 			// copy semantic ids from source to entity
 			// sourceEntityRepository.copySemanticIdentifiersFromSourceEntityToEntity(sourceEntity.getId(),
@@ -483,13 +303,15 @@ public class EntityDataService {
 
 			profiler.messure("Save source entity");
 
+			// add the source entity to the map for later use in relations
 			entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
 		}
 
-		// relations
+		// for each relation
 		for (XMLRelationInstance xmlRelation : data.getRelations()) {
 
 			// Relation Type
+			// TODO: throw exception if the entity type is not defined in the model
 			RelationType relationType = getRelationTypeFromName(xmlRelation.getType());
 
 			SourceRelation sourceRelation = createRelationFromXMLEntityInstance(entitiesByRef, relationType,
@@ -499,19 +321,29 @@ public class EntityDataService {
 			for (XMLFieldValueInstance field : xmlRelation.getFields())
 				addFieldOccurrenceFromXMLFieldInstance(relationType, sourceRelation, field);
 
-			sourceRelationRepository.save(sourceRelation);
+			if (!dryRun) // if not dry run, save source relation
+				sourceRelationRepository.save(sourceRelation);
 
-			// Relation relation = new Relation(relationType,
-			// sourceRelation.getFromEntity().getFinalEntity(),
-			// sourceRelation.getToEntity().getFinalEntity());
-			// relationRepository.saveAndFlush(relation);
+			stats.incrementSourceRelations(); // increment stats
 
 			profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
 
 		}
 
 		// finally update provenance lastUpdate
-		provenanceStore.setLastUpdate(provenance, lastUpdate);
+		if (!dryRun) // if not dry run, update provenance last update
+			provenanceStore.setLastUpdate(provenance, lastUpdate);
+
+
+		//TODO: check if the model contains at least 1 source entity
+		// if (sourceEntitiesCount >= 1 ) {
+		// 	throw new InvalidEntityModelException(
+		// 			"The provided XML Entity file does not contains relations to correlate the defined entities.");
+		// }
+
+		//TODO: report sourceentity count, entity count and source relation count to monitor
+
+		return stats;
 
 	}
 
@@ -526,19 +358,19 @@ public class EntityDataService {
 	 * 
 	 * @param entitiesByRef
 	 * @param xmlRelation
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
 	private SourceRelation createRelationFromXMLEntityInstance(Map<String, SourceEntity> entitiesByRef,
-			RelationType relationType, XMLRelationInstance xmlRelation) throws EntityRelationException {
+			RelationType relationType, XMLRelationInstance xmlRelation) throws EntitiyRelationXMLLoadingException {
 
 		SourceEntity fromEntity = entitiesByRef.get(xmlRelation.getFromEntityRef());
 		if (fromEntity == null)
-			throw new EntityRelationException("Relation contains references to a inexistent From Entity relation:"
+			throw new EntitiyRelationXMLLoadingException("Relation contains references to a inexistent From Entity relation :: "
 					+ xmlRelation.getType() + " " + xmlRelation.getFromEntityRef());
 
 		SourceEntity toEntity = entitiesByRef.get(xmlRelation.getToEntityRef());
 		if (toEntity == null)
-			throw new EntityRelationException("Relation contains references to a inexistent To Entity relation:"
+			throw new EntitiyRelationXMLLoadingException("Relation contains references to a inexistent To Entity relation :: "
 					+ xmlRelation.getType() + " " + xmlRelation.getToEntityRef());
 
 		SourceRelation relation = new SourceRelation(relationType, fromEntity, toEntity);
@@ -558,10 +390,10 @@ public class EntityDataService {
 	 * 
 	 * @param container
 	 * @param field
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
 	private void addFieldOccurrenceFromXMLFieldInstance(EntityRelationType type, FieldOccurrenceContainer container,
-			XMLFieldValueInstance field) throws EntityRelationException {
+			XMLFieldValueInstance field) throws EntitiyRelationXMLLoadingException {
 
 		if (field.getName() != null && !field.getName().trim().isEmpty()) {
 			String fieldName = field.getName();
@@ -575,12 +407,12 @@ public class EntityDataService {
 		}
 	}
 
-	public EntityType getEntityTypeFromName(String name) throws EntityRelationException {
+	public EntityType getEntityTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 		try {
 			return entityTypeStore.getByName(name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + name + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeName for this model db :: "  + name + " does not exists in metamodel");
 		}
 	}
 
@@ -589,17 +421,17 @@ public class EntityDataService {
 		return entityRepository.findById(entityId);
 	}
 
-	public RelationType getRelationTypeFromName(String name) throws EntityRelationException {
+	public RelationType getRelationTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 
 		try {
 			return relationTypeStore.getByName(name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + name + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeName for this model :: " + name + " does not exists in metamodel");
 		}
 	}
 
-	public EntityType getEntityTypeFromId(Long id) throws EntityRelationException {
+	public EntityType getEntityTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
 		EntityType type = entityTypeStore.get(id);
 
@@ -607,11 +439,11 @@ public class EntityDataService {
 			return type;
 		} else {
 			logger.error("Type: " + id + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + id + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
 	}
 
-	public RelationType getRelationTypeFromId(Long id) throws EntityRelationException {
+	public RelationType getRelationTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
 		RelationType type = relationTypeStore.get(id);
 
@@ -620,16 +452,16 @@ public class EntityDataService {
 			return type;
 		else {
 			logger.error("Type: " + id + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + id + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
 	}
 
-	public EntityType getEntityTypeByEntityId(UUID entityId) throws EntityRelationException {
+	public EntityType getEntityTypeByEntityId(UUID entityId) throws EntitiyRelationXMLLoadingException {
 
 		Long entityTypeId = entityRepository.getEntityTypeIdByEntityId(entityId);
 
 		if (entityTypeId == null)
-			throw new EntityRelationException("GetEntityTypeByEntityId - Entity: " + entityId + " does not exists");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeID for this model db :: Entity: " + entityId + " does not exists");
 
 		return getEntityTypeFromId(entityTypeId);
 	}
