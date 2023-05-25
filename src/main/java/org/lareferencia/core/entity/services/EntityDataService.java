@@ -56,18 +56,17 @@ import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceRelationRepository;
+import org.lareferencia.core.entity.services.exception.InvalidEntityModelContentException;
+import org.lareferencia.core.entity.services.exception.InvalidEntityModelException;
+import org.lareferencia.core.entity.services.exception.InvalidModelXMLFileException;
+import org.lareferencia.core.entity.services.exception.InvalidStructureXMLFileException;
+import org.lareferencia.core.entity.services.exception.LoadDataValidationGenericException;
+import org.lareferencia.core.entity.services.to.EntityValitaionSummaryReportEnum;
+import org.lareferencia.core.entity.services.to.EntityValitaionTO;
 import org.lareferencia.core.entity.xml.XMLEntityInstance;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLFieldValueInstance;
 import org.lareferencia.core.entity.xml.XMLRelationInstance;
-import org.lareferencia.core.entity.xml.validation.exception.InvalidEntityModelContentException;
-import org.lareferencia.core.entity.xml.validation.exception.InvalidEntityModelException;
-import org.lareferencia.core.entity.xml.validation.exception.InvalidModelXMLFileException;
-import org.lareferencia.core.entity.xml.validation.exception.InvalidStructureXMLFileException;
-import org.lareferencia.core.entity.xml.validation.exception.LoadDataValidationGenericException;
-import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReport;
-import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportEnum;
-import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportTO;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -115,10 +114,10 @@ public class EntityDataService {
 	// @Getter
 	// private EntityLRUCache entityCache = null;
 
-	@Autowired
 	@Getter
 	@Setter
-	private DocumentValitaionReport documentValitaionReport;
+	@Autowired
+	private EntityLoadingMonitorService entityLoadingMonitorService;
 
 	@Getter
 	@Setter
@@ -152,32 +151,37 @@ public class EntityDataService {
 		fieldOcurrenceCachedStore.flush();
 	}
 
-	public void validateXMLEntityModelParseBeforePersist(Document doc, DocumentValitaionReportTO report) {
+	public void validateXMLEntityModelParseBeforePersist(Document doc, String filePath) {
+		EntityValitaionTO entityValitaionTO = new EntityValitaionTO();
+		entityValitaionTO.setFile(filePath);
+		entityLoadingMonitorService.setIsLoadingProcessInProgress(Boolean.TRUE);
 		try {
-			simulateParseAndPersistEntityRelationDataFromXMLDocument(doc, report);
+			simulateParseAndPersistEntityRelationDataFromXMLDocument(doc);
 		} catch (Exception e) {
-			handleValidationException(e, report);
+			handleValidationException(e,entityValitaionTO);
+		}finally {
+			entityLoadingMonitorService.updateAllSummaryAndReportData();
 		}
 	}
 
-	private void handleValidationException(Exception e, DocumentValitaionReportTO report) {
+	private void handleValidationException(Exception e, EntityValitaionTO entityValitaionTO) {
 		if (e instanceof InvalidModelXMLFileException) {
-			handleInvalidModelXMLFileException((InvalidModelXMLFileException) e, report);
+			handleInvalidModelXMLFileException((InvalidModelXMLFileException) e, entityValitaionTO);
 		}
 		if (e instanceof InvalidStructureXMLFileException) {
-			handleInvalidStructureXMLFileException((InvalidStructureXMLFileException) e, report);
+			handleInvalidStructureXMLFileException((InvalidStructureXMLFileException) e, entityValitaionTO);
 		}
 		if (e instanceof InvalidEntityModelException) {
-			handleInvalidEntityModelException((InvalidEntityModelException) e, report);
+			handleInvalidEntityModelException((InvalidEntityModelException) e, entityValitaionTO);
 		}
 		if (e instanceof InvalidEntityModelContentException) {
-			handleInvalidEntityModelContentException((InvalidEntityModelContentException) e, report);
+			handleInvalidEntityModelContentException((InvalidEntityModelContentException) e, entityValitaionTO);
 		}
 		if (e instanceof EntityRelationException) {
-			handleInvalidEntityRelationException((EntityRelationException) e, report);
+			handleInvalidEntityRelationException((EntityRelationException) e, entityValitaionTO);
 		}
 		if (e instanceof LoadDataValidationGenericException) {
-			handleLoadDataValidationGenericException((LoadDataValidationGenericException)e, report);
+			handleLoadDataValidationGenericException((LoadDataValidationGenericException)e, entityValitaionTO);
 		}
 
 	}
@@ -186,8 +190,7 @@ public class EntityDataService {
 
 
 
-	private void simulateParseAndPersistEntityRelationDataFromXMLDocument(Document doc,
-			DocumentValitaionReportTO simulateParseEntityRelationDataFromXmlDocument)
+	private void simulateParseAndPersistEntityRelationDataFromXMLDocument(Document doc)
 			throws LoadDataValidationGenericException, InvalidEntityModelContentException, InvalidEntityModelException,
 			InvalidStructureXMLFileException, InvalidModelXMLFileException, EntityRelationException {
 		profiler.messure("Entity Model XML File validation.");
@@ -196,48 +199,45 @@ public class EntityDataService {
 	}
 	
 	private void handleLoadDataValidationGenericException(LoadDataValidationGenericException ex,
-			DocumentValitaionReportTO report) {
-		report.setStatus(DocumentValitaionReportEnum.GENERIC_ERROR);
+			EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.GENERIC_ERROR.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getGenericErroFilesList().add(report);
+		entityLoadingMonitorService.getGenericErroFilesList().add(report);
 	}
 
-	private void handleInvalidEntityRelationException(EntityRelationException ex, DocumentValitaionReportTO report) {
-		report
-		.setStatus(DocumentValitaionReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE);
+	private void handleInvalidEntityRelationException(EntityRelationException ex, EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidModelFilesList().add(report);
+		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
 	}
 	
 	private void handleInvalidEntityModelContentException(InvalidEntityModelContentException ex,
-			DocumentValitaionReportTO report) {
-		report.setStatus(DocumentValitaionReportEnum.INVALID_CONTENT_ISSUE);
+			EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_CONTENT_ISSUE.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidContentDataList().add(report);
+		entityLoadingMonitorService.getInvalidContentDataList().add(report);
 	}
 
 	private void handleInvalidEntityModelException(InvalidEntityModelException ex,
-			DocumentValitaionReportTO report) {
-		report
-				.setStatus(DocumentValitaionReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE);
+			EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ENTITY_MODEL_INTEGRITY_ISSUE.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidModelFilesList().add(report);
+		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
 	}
 
 	private void handleInvalidModelXMLFileException(InvalidModelXMLFileException ex,
-			DocumentValitaionReportTO report) {
-		report
-				.setStatus(DocumentValitaionReportEnum.INVALID_MODEL_INTEGRITY_ISSUE);
+			EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_MODEL_INTEGRITY_ISSUE.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidModelFilesList().add(report);
+		entityLoadingMonitorService.getInvalidModelFilesList().add(report);
 	}
 
 
 	private void handleInvalidStructureXMLFileException(InvalidStructureXMLFileException ex,
-			DocumentValitaionReportTO report) {
-		report.setStatus(DocumentValitaionReportEnum.INVALID_ESTRUCTURAL_ISSUE);
+			EntityValitaionTO report) {
+		report.setStatus(EntityValitaionSummaryReportEnum.INVALID_ESTRUCTURAL_ISSUE.getDescription());
 		report.setDetails(ex.getMessage());
-		documentValitaionReport.getInvalidStructuredXMLFilesList().add(report);
+		entityLoadingMonitorService.getInvalidStructuredXMLFilesList().add(report);
 	}
 
 	/**

@@ -1,11 +1,11 @@
-package org.lareferencia.core.entity.xml.validation.exception;
+package org.lareferencia.core.entity.services.exception;
 
-import org.lareferencia.core.entity.xml.validation.report.DocumentValitaionReportEnum;
+import org.lareferencia.core.entity.services.to.EntityValitaionSummaryReportEnum;
 
 public class InvalidStructureXMLFileException extends Exception{
 	
 
-	private static final String DEFAULT_MESSAGE = DocumentValitaionReportEnum.INVALID_ESTRUCTURAL_ISSUE.getDescription();
+	private static final String DEFAULT_MESSAGE = EntityValitaionSummaryReportEnum.INVALID_ESTRUCTURAL_ISSUE.getDescription();
 	
 	
 	public InvalidStructureXMLFileException() {
