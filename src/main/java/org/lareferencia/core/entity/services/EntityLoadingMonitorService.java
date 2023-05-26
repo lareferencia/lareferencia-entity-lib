@@ -9,6 +9,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 
+import net.minidev.json.annotate.JsonIgnore;
 import org.lareferencia.core.entity.services.exception.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Scope;
@@ -23,24 +24,22 @@ import lombok.Getter;
 import lombok.Setter;
 
 // this class is a singleton because it is a spring service that runs in a single thread for every loading process
-@Scope("singleton")
 @Service
 @ManagedResource(objectName = "org.lareferencia:type=EntityLoadingMonitorService")
 public class EntityLoadingMonitorService {
 
 	private static final String JSON = ".json";
 	private static final String DD_MM_YYYY_HH_MM_SS = "dd_MM_yyyy_HH_mm_ss";
-	private static final String REPORT_NAME = "entity-report_";
+	private static final String REPORT_NAME = "_report_";
 
 	//Loading flag
-	@Getter
 	@Setter
-	@Value("${loadingProcessMonitor.isLoadingProcessInProgress:false}")
-    private Boolean isLoadingProcessInProgress;
+    private Boolean loadingProcessInProgress = false;
 
 	@ManagedAttribute(description = "Loading process in progress")
-	public boolean isLoadingProcessInProgress() {
-		return isLoadingProcessInProgress;
+	@JsonIgnore
+	public Boolean loadingProcessInProgress() {
+		return loadingProcessInProgress;
 	}
 	
 	EntityLoadingStats entityLoadingStats = new EntityLoadingStats();
@@ -147,14 +146,13 @@ public class EntityLoadingMonitorService {
 		this.entityLoadingStats.add(stats);
 	}
 
-	public void writeToJSON() {
+	public void writeToJSON(String originalFileName) {
 
 		ObjectMapper mapper = new ObjectMapper();
-		String fileName = REPORT_NAME + new SimpleDateFormat(DD_MM_YYYY_HH_MM_SS).format(new Date()) + JSON;
-		// TODO: improve this 
-		String filePath =  fileName;
+		String reportFilePath = originalFileName + REPORT_NAME + new SimpleDateFormat(DD_MM_YYYY_HH_MM_SS).format(new Date()) + JSON;
+
 		try {
-			mapper.writeValue(new File(filePath), this);
+			mapper.writeValue(new File(reportFilePath), this);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();

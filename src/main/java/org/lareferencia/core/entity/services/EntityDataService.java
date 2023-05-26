@@ -35,6 +35,7 @@ import javax.xml.bind.JAXBContext;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 
+import lombok.AllArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -153,7 +154,6 @@ public class EntityDataService {
 		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
 		profiler.messure("EntityXML Parse");
 		return persistEntityRelationData(erData, dryRun);
-
 	}
 
 	/**
@@ -278,14 +278,17 @@ public class EntityDataService {
 
 			profiler.messure("Find or Create Final Entity");		
 			// find existing entity o create a new one
-			Entity entity = findOrCreateFinalEntity(sourceEntity);
-			if (entity.isNew()) 
+			FindOrCreateEntityResult findOrCreateFinalEntityResult = findOrCreateFinalEntity(sourceEntity);
+
+			// if the entity is new, increment entities stats, if not, increment duplications found stats
+			if (!findOrCreateFinalEntityResult.entityAlreadyExists)
 				stats.incrementEntities(); // increment entities stats because the entity is new
 			else	
 				stats.incrementDuplicationsFound(); // increment duplications found stats because the entity already exists
 		
 			// set that entity as final entity for this source entity
-			sourceEntity.setFinalEntity(entity);
+			sourceEntity.setFinalEntity(findOrCreateFinalEntityResult.entity);
+
 			// sourceEntityRepository.updateFinalEntityReference(sourceEntity.getId(),
 			// entity.getId());
 
@@ -476,23 +479,32 @@ public class EntityDataService {
 			entityRepository.deleteById(entityId);
 	}
 
-	public Entity findOrCreateFinalEntity(SourceEntity sourceEntity) {
+	public FindOrCreateEntityResult findOrCreateFinalEntity(SourceEntity sourceEntity) {
 
 		Collection<SemanticIdentifier> semanticIdentifiers = sourceEntity.getSemanticIdentifiers();
 		List<Long> semanticIds = semanticIdentifiers.stream().map(SemanticIdentifier::getId)
 				.collect(Collectors.toList());
 
+		Boolean entityAlreadyExists = true;
 		Entity entity = entityRepository.findEntityWithSemanticIdentifiers(semanticIds);
 
 		if (entity == null) { // No entities with shared semantic identifiers exists the create
 			entity = new Entity(sourceEntity.getEntityType());
+			entityAlreadyExists = false;
 		}
 
 		entity.setDirty(true);
 		entity.addSemanticIdentifiers(semanticIdentifiers);
 		entityRepository.saveAndFlush(entity);
 
-		return entity;
+		return new FindOrCreateEntityResult(entity, entityAlreadyExists);
+	}
+
+	@Getter @Setter
+	@AllArgsConstructor
+	class FindOrCreateEntityResult {
+		private Entity entity;
+		private Boolean entityAlreadyExists;
 	}
 
 	@Transactional
