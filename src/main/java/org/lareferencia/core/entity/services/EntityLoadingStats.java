@@ -1,7 +1,9 @@
 package org.lareferencia.core.entity.services;
 
 import lombok.Getter;
+import lombok.ToString;
 
+@ToString
 public class EntityLoadingStats {
 
     @Getter
