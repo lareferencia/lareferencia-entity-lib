@@ -180,7 +180,7 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 			}
 			
 			erService.setProfiler(profiler);
-			erService.parseAndPersistEntityRelationDataFromXMLDocument(entityDataDocument);
+			erService.parseAndPersistEntityRelationDataFromXMLDocument(entityDataDocument, false);
 			
 			profiler.report(logger);
 			

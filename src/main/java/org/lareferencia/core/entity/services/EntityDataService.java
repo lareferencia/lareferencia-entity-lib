@@ -35,6 +35,7 @@ import javax.xml.bind.JAXBContext;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 
+import lombok.AllArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -48,7 +49,15 @@ import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.domain.SourceEntity;
 import org.lareferencia.core.entity.domain.SourceRelation;
-import org.lareferencia.core.entity.repositories.jpa.*;
+import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
+import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
+import org.lareferencia.core.entity.repositories.jpa.FieldOccurrenceRepository;
+import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
+import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
+import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
+import org.lareferencia.core.entity.repositories.jpa.SourceRelationRepository;
+import org.lareferencia.core.entity.services.exception.EntitiyRelationXMLLoadingException;
 import org.lareferencia.core.entity.xml.XMLEntityInstance;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLFieldValueInstance;
@@ -58,7 +67,6 @@ import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -85,7 +93,6 @@ public class EntityDataService {
 	@Autowired
 	SourceRelationRepository sourceRelationRepository;
 
-
 	@Autowired
 	private DateHelper dateHelper;
 
@@ -94,24 +101,23 @@ public class EntityDataService {
 
 	@Autowired
 	private ProvenanceRepository provenanceRepository;
-	
+
 	@Autowired
 	private SemanticIdentifierRepository semanticIdentifierRepository;
 
-	//@Setter
-	//@Getter
-	//private EntityLRUCache entityCache = null;
+	// @Setter
+	// @Getter
+	// private EntityLRUCache entityCache = null;
 
 	@Getter
 	@Setter
 	private Profiler profiler = new Profiler(false, "");
 
-	ConcurrentCachedNamedStore<Long, EntityType,EntityTypeRepository> entityTypeStore;
-	ConcurrentCachedNamedStore<Long,RelationType,RelationTypeRepository> relationTypeStore;
+	ConcurrentCachedNamedStore<Long, EntityType, EntityTypeRepository> entityTypeStore;
+	ConcurrentCachedNamedStore<Long, RelationType, RelationTypeRepository> relationTypeStore;
 	SemanticIdentifierCachedStore semanticIdentifierCachedStore;
 	ProvenanceStore provenanceStore;
 	FieldOcurrenceCachedStore fieldOcurrenceCachedStore;
-
 
 	public EntityDataService() {
 
@@ -119,12 +125,12 @@ public class EntityDataService {
 
 	@PostConstruct
 	private void postConstruct() {
-		entityTypeStore = new ConcurrentCachedNamedStore<>(entityTypeRepository,100,true,0);
-		relationTypeStore = new ConcurrentCachedNamedStore<>(relationTypeRepository,100,true,0);
+		entityTypeStore = new ConcurrentCachedNamedStore<>(entityTypeRepository, 100, true, 0);
+		relationTypeStore = new ConcurrentCachedNamedStore<>(relationTypeRepository, 100, true, 0);
 
-		semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository,1000);
+		semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository, 1000);
 		provenanceStore = new ProvenanceStore(provenanceRepository);
-		fieldOcurrenceCachedStore = new FieldOcurrenceCachedStore(fieldOccurrenceRepository,1000);
+		fieldOcurrenceCachedStore = new FieldOcurrenceCachedStore(fieldOccurrenceRepository, 1000);
 	}
 
 	@PreDestroy
@@ -135,13 +141,19 @@ public class EntityDataService {
 		fieldOcurrenceCachedStore.flush();
 	}
 
+	
+	/**
+	 * Load EntityRelation Data instance from XML Document and persist it
+	 * 
+	 * @param document XML Document
+	 * @param dryRun if true, no data will be persisted
+	 * @throws Exception
+	 */
 	@Transactional(propagation = Propagation.REQUIRED)
-	public void parseAndPersistEntityRelationDataFromXMLDocument(Document document) throws EntityRelationException {
+	public EntityLoadingStats parseAndPersistEntityRelationDataFromXMLDocument(Document document, Boolean dryRun) throws Exception {
 		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
 		profiler.messure("EntityXML Parse");
-
-		persistEntityRelationData(erData);
-
+		return persistEntityRelationData(erData, dryRun);
 	}
 
 	/**
@@ -149,10 +161,9 @@ public class EntityDataService {
 	 * 
 	 * @param document
 	 * @return
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
-	public XMLEntityRelationData parseEntityRelationDataFromXmlDocument(Document document)
-			throws EntityRelationException {
+	public XMLEntityRelationData parseEntityRelationDataFromXmlDocument(Document document) throws Exception {
 
 		XMLEntityRelationData erData = new XMLEntityRelationData();
 
@@ -166,11 +177,16 @@ public class EntityDataService {
 			erData = (XMLEntityRelationData) unmarshaller.unmarshal(document);
 
 		} catch (Exception e) {
-			throw new EntityRelationException("Error loading Entity-Relation data from XML Document " + e.getMessage());
+			throw new EntitiyRelationXMLLoadingException (
+					"Error parsing XML File to Entity-Relation data :: " + e.getMessage());		
 		}
 
 		// check consistency
-		erData.isConsistent();
+		try {
+			erData.isConsistent();
+		} catch (Exception imfex) {
+			throw new EntitiyRelationXMLLoadingException( "Entity-Relation data is no consistent :: " + imfex.getMessage());
+		}
 
 		return erData;
 	}
@@ -179,36 +195,64 @@ public class EntityDataService {
 	 * Persist a XMLEntityRelation Data instance in DB Metamodel Objects
 	 * 
 	 * @param data
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
 	@Transactional(propagation = Propagation.REQUIRES_NEW)
-	public void persistEntityRelationData(XMLEntityRelationData data) throws EntityRelationException {
+	public EntityLoadingStats persistEntityRelationData(XMLEntityRelationData data, Boolean dryRun) throws Exception {
+
+		EntityLoadingStats stats = new EntityLoadingStats();
 
 		Map<String, SourceEntity> entitiesByRef = new HashMap<String, SourceEntity>();
-	
-		if (data.getLastUpdate() == null || data.getSource() == null || data.getRecord() == null) {
-			System.out.println( data.getLastUpdate() + data.getSource() + data.getRecord() == null );
-			throw new EntityRelationException("Null field in provenacefound in xml entity definition");
+
+		if (data.getLastUpdate() == null) {
+			throw new EntitiyRelationXMLLoadingException(
+					"The LastUpdate field is Null on provenace for the given XML entity definition :: " + data.getLastUpdate());
+		}
+		if (data.getSource() == null) {
+			throw new EntitiyRelationXMLLoadingException(
+					"The Source field is Null on provenace for the given XML entity definition :: " + data.getSource());
+		}
+		if (data.getRecord() == null) {
+			throw new EntitiyRelationXMLLoadingException(
+					"The Record field is Null on provenace for the given XML entity definition :: " + data.getRecord());
 		}
 
-		Provenance provenance = provenanceStore.loadOrCreate(data.getSource(), data.getRecord());
+		// provenance
+		Provenance provenance = null;		
+		if (dryRun) // if dry run, do not persist provenance 
+			provenance = new Provenance(data.getSource(), data.getRecord());
+		else // if not dry run, load or create provenance
+			provenance = provenanceStore.loadOrCreate(data.getSource(), data.getRecord());
 
-		LocalDateTime lastUpdate = dateHelper.parseDate(data.getLastUpdate());
-		
+
+		// last update
+		LocalDateTime lastUpdate = null;
+		try {
+			lastUpdate = dateHelper.parseDate(data.getLastUpdate());
+			if (!dateHelper.isValidLocalDateTime(lastUpdate)) {
+				throw new EntitiyRelationXMLLoadingException(
+						"The LastUpdate field is not valid :: lastUpdate: " + lastUpdate);
+			}
+		} catch (Exception e) {
+			throw new EntitiyRelationXMLLoadingException(
+					"The LastUpdate field is not valid :: lastUpdate: " + lastUpdate);
+		}
+
+
+		// check if the provenance is new or update
 		Boolean isNew = provenance.getLastUpdate() == null;
 		Boolean isUpdate = provenance.getLastUpdate() != null && provenance.getLastUpdate().isBefore(lastUpdate);
-		
-		if ( !isNew && !isUpdate )
-			return;
 
-		if ( isUpdate ) {
-			// logically delete existing source entities because it will be created again
+		// if is not new and is not update, do nothing
+		if (!isNew && !isUpdate) return stats;
+
+		if (isUpdate) // logically delete existing source entities related with this provenance because they will be replaced
 			sourceEntityRepository.logicalDeleteByProvenanceId(provenance.getId());
-		}
-				
-		// entities
+		
+		// iterate over entities in the XML
 		for (XMLEntityInstance xmlEntity : data.getEntities()) {
 
+			// TODO: throw exception if the entity type is not defined in the model
 			EntityType entityType = getEntityTypeFromName(xmlEntity.getType());
 
 			profiler.messure(xmlEntity.getType() + " Source Entity", true);
@@ -218,59 +262,91 @@ public class EntityDataService {
 			for (XMLFieldValueInstance field : xmlEntity.getFields())
 				addFieldOccurrenceFromXMLFieldInstance(entityType, sourceEntity, field);
 
+			// add semantic identifiers 
+			Boolean isAtLeastOneMinimalViableSemanticIdentifier = false;	
 			for (String semanticId : xmlEntity.getSemanticIdentifiers())
-				if (isMinimalViableSemanticIdentifier(semanticId))
-					sourceEntity.addSemanticIdentifier( semanticIdentifierCachedStore.loadOrCreate(semanticId) );
-	
-			profiler.messure("Persist Source Entity");
+				if (isMinimalViableSemanticIdentifier(semanticId)) {
+					if (!dryRun) // if not dry run, load or create semantic identifier
+						sourceEntity.addSemanticIdentifier(semanticIdentifierCachedStore.loadOrCreate(semanticId));
+					isAtLeastOneMinimalViableSemanticIdentifier = true;
+				}
 			
+			// if there is no semantic identifier, throw exception
+			if (!isAtLeastOneMinimalViableSemanticIdentifier) {
+				throw new EntitiyRelationXMLLoadingException("The provided XML Entity does not contain at least one semanticIdentifier ::  Entity: " + xmlEntity.getRef());
+			}
+
+			profiler.messure("Find or Create Final Entity");		
 			// find existing entity o create a new one
-			Entity entity = findOrCreateFinalEntity(sourceEntity);
-			
+			FindOrCreateEntityResult findOrCreateFinalEntityResult = findOrCreateFinalEntity(sourceEntity);
+
+			// if the entity is new, increment entities stats, if not, increment duplications found stats
+			if (!findOrCreateFinalEntityResult.entityAlreadyExists)
+				stats.incrementEntities(); // increment entities stats because the entity is new
+			else	
+				stats.incrementDuplicationsFound(); // increment duplications found stats because the entity already exists
+		
 			// set that entity as final entity for this source entity
-			sourceEntity.setFinalEntity(entity);
-			//sourceEntityRepository.updateFinalEntityReference(sourceEntity.getId(), entity.getId());
-			
-			profiler.messure("Find or Create Final Entity");
-			
-			// save the source entity 
-			sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
-			
+			sourceEntity.setFinalEntity(findOrCreateFinalEntityResult.entity);
+
+			// sourceEntityRepository.updateFinalEntityReference(sourceEntity.getId(),
+			// entity.getId());
+
+			// save the source entity
+			profiler.messure("Persist Source Entity");
+			if (!dryRun) // if not dry run, save source entity
+				sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
+
+			stats.incrementSourceEntities(); // increment stats
+
+
 			// copy semantic ids from source to entity
-			//sourceEntityRepository.copySemanticIdentifiersFromSourceEntityToEntity(sourceEntity.getId(), entity.getId());
-						
+			// sourceEntityRepository.copySemanticIdentifiersFromSourceEntityToEntity(sourceEntity.getId(),
+			// entity.getId());
+
 			profiler.messure("Save source entity");
 
-			
+			// add the source entity to the map for later use in relations
 			entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
 		}
 
-		// relations
+		// for each relation
 		for (XMLRelationInstance xmlRelation : data.getRelations()) {
 
 			// Relation Type
+			// TODO: throw exception if the entity type is not defined in the model
 			RelationType relationType = getRelationTypeFromName(xmlRelation.getType());
 
-			SourceRelation sourceRelation = createRelationFromXMLEntityInstance(entitiesByRef, relationType, xmlRelation);	
-			
+			SourceRelation sourceRelation = createRelationFromXMLEntityInstance(entitiesByRef, relationType,
+					xmlRelation);
+
 			// for each relation define or update the occurrences
 			for (XMLFieldValueInstance field : xmlRelation.getFields())
 				addFieldOccurrenceFromXMLFieldInstance(relationType, sourceRelation, field);
-	
-			sourceRelationRepository.save(sourceRelation);
-			
-			//Relation relation = new Relation(relationType, sourceRelation.getFromEntity().getFinalEntity(), sourceRelation.getToEntity().getFinalEntity());
-			//relationRepository.saveAndFlush(relation);
 
-			
+			if (!dryRun) // if not dry run, save source relation
+				sourceRelationRepository.save(sourceRelation);
+
+			stats.incrementSourceRelations(); // increment stats
+
 			profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
 
 		}
-		
+
 		// finally update provenance lastUpdate
-		provenanceStore.setLastUpdate(provenance,lastUpdate);
+		if (!dryRun) // if not dry run, update provenance last update
+			provenanceStore.setLastUpdate(provenance, lastUpdate);
 
 
+		//TODO: check if the model contains at least 1 source entity
+		// if (sourceEntitiesCount >= 1 ) {
+		// 	throw new InvalidEntityModelException(
+		// 			"The provided XML Entity file does not contains relations to correlate the defined entities.");
+		// }
+
+		//TODO: report sourceentity count, entity count and source relation count to monitor
+
+		return stats;
 
 	}
 
@@ -285,18 +361,20 @@ public class EntityDataService {
 	 * 
 	 * @param entitiesByRef
 	 * @param xmlRelation
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
-	private SourceRelation createRelationFromXMLEntityInstance(Map<String, SourceEntity> entitiesByRef, RelationType relationType, XMLRelationInstance xmlRelation) throws EntityRelationException {
+	private SourceRelation createRelationFromXMLEntityInstance(Map<String, SourceEntity> entitiesByRef,
+			RelationType relationType, XMLRelationInstance xmlRelation) throws EntitiyRelationXMLLoadingException {
 
-		
-		SourceEntity fromEntity = entitiesByRef.get( xmlRelation.getFromEntityRef() );
+		SourceEntity fromEntity = entitiesByRef.get(xmlRelation.getFromEntityRef());
 		if (fromEntity == null)
-			throw new EntityRelationException("Relation contains references to a inexistent From Entity relation:" + xmlRelation.getType() + " " + xmlRelation.getFromEntityRef() );
+			throw new EntitiyRelationXMLLoadingException("Relation contains references to a inexistent From Entity relation :: "
+					+ xmlRelation.getType() + " " + xmlRelation.getFromEntityRef());
 
-		SourceEntity toEntity = entitiesByRef.get( xmlRelation.getToEntityRef() );
+		SourceEntity toEntity = entitiesByRef.get(xmlRelation.getToEntityRef());
 		if (toEntity == null)
-			throw new EntityRelationException("Relation contains references to a inexistent To Entity relation:" + xmlRelation.getType() + " " + xmlRelation.getToEntityRef() );
+			throw new EntitiyRelationXMLLoadingException("Relation contains references to a inexistent To Entity relation :: "
+					+ xmlRelation.getType() + " " + xmlRelation.getToEntityRef());
 
 		SourceRelation relation = new SourceRelation(relationType, fromEntity, toEntity);
 //		relation.setFromFinalEntity(fromEntity.getFinalEntity());
@@ -305,41 +383,39 @@ public class EntityDataService {
 		return relation;
 	}
 
-	
 	// TODO: Implement a filter for minimal viable sematic identifier
 	private Boolean isMinimalViableSemanticIdentifier(String semanticIdentifier) {
 		return semanticIdentifier != null && semanticIdentifier.length() > 4;
 	}
-
 
 	/**
 	 * Adds field occurrence to a container (Relation or Entity)
 	 * 
 	 * @param container
 	 * @param field
-	 * @throws EntityRelationException
+	 * @throws EntitiyRelationXMLLoadingException
 	 */
 	private void addFieldOccurrenceFromXMLFieldInstance(EntityRelationType type, FieldOccurrenceContainer container,
-														XMLFieldValueInstance field) throws EntityRelationException {
+			XMLFieldValueInstance field) throws EntitiyRelationXMLLoadingException {
 
-		if (field.getName() != null && !field.getName().trim().isEmpty() ) {
+		if (field.getName() != null && !field.getName().trim().isEmpty()) {
 			String fieldName = field.getName();
-			
+
 			try {
 				FieldType fieldType = type.getFieldByName(fieldName);
-				container.addFieldOccurrence( fieldOcurrenceCachedStore.loadOrCreate(fieldType, field) );
+				container.addFieldOccurrence(fieldOcurrenceCachedStore.loadOrCreate(fieldType, field));
 			} catch (EntityRelationException e) {
-				logger.info("Ignoring field: " + fieldName + " :: " +  e.getMessage() );
+				logger.info("Ignoring field: " + fieldName + " :: " + e.getMessage());
 			}
 		}
 	}
 
-	public EntityType getEntityTypeFromName(String name) throws EntityRelationException {
+	public EntityType getEntityTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 		try {
 			return entityTypeStore.getByName(name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + name + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeName for this model db :: "  + name + " does not exists in metamodel");
 		}
 	}
 
@@ -348,17 +424,17 @@ public class EntityDataService {
 		return entityRepository.findById(entityId);
 	}
 
-	public RelationType getRelationTypeFromName(String name) throws EntityRelationException {
+	public RelationType getRelationTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 
 		try {
 			return relationTypeStore.getByName(name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + name + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeName for this model :: " + name + " does not exists in metamodel");
 		}
 	}
 
-	public EntityType getEntityTypeFromId(Long id) throws EntityRelationException {
+	public EntityType getEntityTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
 		EntityType type = entityTypeStore.get(id);
 
@@ -366,11 +442,11 @@ public class EntityDataService {
 			return type;
 		} else {
 			logger.error("Type: " + id + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + id + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
 	}
 
-	public RelationType getRelationTypeFromId(Long id) throws EntityRelationException {
+	public RelationType getRelationTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
 		RelationType type = relationTypeStore.get(id);
 
@@ -379,20 +455,19 @@ public class EntityDataService {
 			return type;
 		else {
 			logger.error("Type: " + id + " does not exists in metamodel");
-			throw new EntityRelationException("Type: " + id + " does not exists in metamodel");
+			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
 	}
 
-	public EntityType getEntityTypeByEntityId(UUID entityId) throws EntityRelationException {
+	public EntityType getEntityTypeByEntityId(UUID entityId) throws EntitiyRelationXMLLoadingException {
 
 		Long entityTypeId = entityRepository.getEntityTypeIdByEntityId(entityId);
 
 		if (entityTypeId == null)
-			throw new EntityRelationException("GetEntityTypeByEntityId - Entity: " + entityId + " does not exists");
+			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeID for this model db :: Entity: " + entityId + " does not exists");
 
 		return getEntityTypeFromId(entityTypeId);
 	}
-
 
 	/************************
 	 * Deduplication
@@ -404,39 +479,45 @@ public class EntityDataService {
 			entityRepository.deleteById(entityId);
 	}
 
-	
-	public Entity findOrCreateFinalEntity(SourceEntity sourceEntity) {
-		
-		
-			Collection<SemanticIdentifier> semanticIdentifiers = sourceEntity.getSemanticIdentifiers();
-			List<Long> semanticIds = semanticIdentifiers.stream().map(SemanticIdentifier::getId).collect(Collectors.toList());
-	
-			Entity entity = entityRepository.findEntityWithSemanticIdentifiers(semanticIds);
-			
-			if (entity == null ) { // No entities with shared semantic identifiers exists the create
-				entity = new Entity(sourceEntity.getEntityType());
-			} 
-			
-			entity.setDirty(true);
-			entity.addSemanticIdentifiers(semanticIdentifiers);
-			entityRepository.saveAndFlush(entity);
-						
-			return entity;
+	public FindOrCreateEntityResult findOrCreateFinalEntity(SourceEntity sourceEntity) {
+
+		Collection<SemanticIdentifier> semanticIdentifiers = sourceEntity.getSemanticIdentifiers();
+		List<Long> semanticIds = semanticIdentifiers.stream().map(SemanticIdentifier::getId)
+				.collect(Collectors.toList());
+
+		Boolean entityAlreadyExists = true;
+		Entity entity = entityRepository.findEntityWithSemanticIdentifiers(semanticIds);
+
+		if (entity == null) { // No entities with shared semantic identifiers exists the create
+			entity = new Entity(sourceEntity.getEntityType());
+			entityAlreadyExists = false;
+		}
+
+		entity.setDirty(true);
+		entity.addSemanticIdentifiers(semanticIdentifiers);
+		entityRepository.saveAndFlush(entity);
+
+		return new FindOrCreateEntityResult(entity, entityAlreadyExists);
 	}
 
-	@Transactional 
+	@Getter @Setter
+	@AllArgsConstructor
+	class FindOrCreateEntityResult {
+		private Entity entity;
+		private Boolean entityAlreadyExists;
+	}
+
+	@Transactional
 	public synchronized void mergeEntityRelationData() {
 		entityRepository.mergeEntiyRelationData();
 	}
-	
+
 	public List<Entity> findEntitiesByProvenanceSourceAndRecordId(String sourceId, String recordId) {
 		return entityRepository.findByProvenaceSourceAndRecordId(sourceId, recordId);
 	}
-	
+
 	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
 		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
 	}
-	
-
 
 }
