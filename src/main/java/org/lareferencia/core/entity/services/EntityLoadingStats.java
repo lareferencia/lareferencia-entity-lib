@@ -3,57 +3,51 @@ package org.lareferencia.core.entity.services;
 import lombok.Getter;
 import lombok.ToString;
 
+import java.util.HashMap;
+import java.util.Map;
+
 @ToString
-public class EntityLoadingStats {
-
-    @Getter
-    private int sourceEntities;
-
-    @Getter
-    private int entities;
-
-    @Getter
-    private int duplicationsFound;
-
-    @Getter
-    private int sourceRelations;
-
-    @Getter
-    private int relations;
+public class EntityLoadingStats extends HashMap<String, Long> {
 
     public EntityLoadingStats() {
-        this.sourceEntities = 0;
-        this.entities = 0;
-        this.sourceRelations = 0;
-        this.relations = 0;
-        this.duplicationsFound = 0;
+
+        super();
+
+        this.put("sourceEntities", 0L);
+        //this.put("updatedSourceEntities", 0L);
+        this.put("entities", 0L);
+        this.put("duplicationsFound", 0L);
+        this.put("sourceRelations", 0L);
+        //this.put("relations", 0L);
+
     }
 
-    public void incrementSourceEntities() {
-        this.sourceEntities++;
+    public void incrementSourceEntities()  {
+        this.put("sourceEntities", this.get("sourceEntities") + 1L);
     }
 
-    public void incrementEntities() {
-        this.entities++;
+    public void incrementEntities()  {
+        this.put("entities", this.get("entities") + 1L);
     }
 
-    public void incrementSourceRelations() {
-        this.sourceRelations++;
+    public void incrementDuplicationsFound()  {
+        this.put("duplicationsFound", this.get("duplicationsFound") + 1L);
     }
 
-    public void incrementRelations() {
-        this.relations++;
+    public void incrementSourceRelations()  {
+        this.put("sourceRelations", this.get("sourceRelations") + 1L);
     }
 
-    public void incrementDuplicationsFound() {
-        this.duplicationsFound++;
+    public void incrementRelations()  {
+        this.put("relations", this.get("relations") + 1L);
     }
 
     public void add(EntityLoadingStats other) {
-        this.sourceEntities += other.sourceEntities;
-        this.entities += other.entities;
-        this.sourceRelations += other.sourceRelations;
-        this.relations += other.relations;
-        this.duplicationsFound += other.duplicationsFound;
+        this.put("sourceEntities", this.get("sourceEntities") + other.get("sourceEntities"));
+        this.put("entities", this.get("entities") + other.get("entities"));
+        this.put("duplicationsFound", this.get("duplicationsFound") + other.get("duplicationsFound"));
+        this.put("sourceRelations", this.get("sourceRelations") + other.get("sourceRelations"));
+        this.put("relations", this.get("relations") + other.get("relations"));
     }
+
 }
