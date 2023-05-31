@@ -84,7 +84,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 			m.removeAll();
 			dataset.commit();
 			
-			logger.info("Graph cleaned inside triplestore.");
+			logger.info("Graph cleared inside triplestore.");
 		}
 		finally { 
 			dataset.end(); 

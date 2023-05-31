@@ -225,7 +225,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 								String elementId, boolean fromRelation) {
 		
 		for (AttributeIndexingConfig attributeConfig : attributeConfigs) {	
-			if (attributeConfig.getSubAttributes() != null) { //field has subfields
+			if (!attributeConfig.getSubAttributes().isEmpty()) { //field has subfields
 				List<AttributeIndexingConfig> subAttributes = attributeConfig.getSubAttributes();
 				processAttributeList(subAttributes, occurrences, elementId, fromRelation);
 			}

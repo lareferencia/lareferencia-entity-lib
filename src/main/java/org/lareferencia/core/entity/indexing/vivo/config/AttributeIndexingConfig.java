@@ -42,7 +42,7 @@ public class AttributeIndexingConfig {
 		return name;
 	}
 	
-	private List<RDFTripleConfig> targetTriples = new LinkedList<RDFTripleConfig>();
+	private List<RDFTripleConfig> targetTriples = new LinkedList<RDFTripleConfig>();;
 	private List<AttributeIndexingConfig> subAttributes = new LinkedList<AttributeIndexingConfig>();
 
 	@XmlElementWrapper(name="target-triples")
