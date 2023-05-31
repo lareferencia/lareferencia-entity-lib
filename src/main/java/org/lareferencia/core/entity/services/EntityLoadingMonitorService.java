@@ -41,12 +41,33 @@ public class EntityLoadingMonitorService {
 	public Boolean loadingProcessInProgress() {
 		return loadingProcessInProgress;
 	}
-	
+
+
 	EntityLoadingStats entityLoadingStats = new EntityLoadingStats();
 
-	@ManagedAttribute(description = "Monitor: Entities and relations loaded statistics")
-	public EntityLoadingStats getEntityLoadingStatistics() {
-		return entityLoadingStats;
+	@ManagedAttribute(description = "Source Entities Loaded")
+	public Long getSourceEntitiesLoaded() {
+		return entityLoadingStats.getSourceEntitiesLoaded();
+	}
+
+	@ManagedAttribute(description = "Entities Created")
+	public Long getEntitiesCreated() {
+		return entityLoadingStats.getEntitiesCreated();
+	}
+
+	@ManagedAttribute(description = "Entities Duplicated")
+	public Long getEntitiesDuplicated() {
+		return entityLoadingStats.getEntitiesDuplicated();
+	}
+
+	@ManagedAttribute(description = "Source Relations Loaded")
+	public Long getSourceRelationsLoaded() {
+		return entityLoadingStats.getSourceRelationsLoaded();
+	}
+
+	@ManagedAttribute(description = "Relations Created")
+	public Long getRelationsCreated() {
+		return entityLoadingStats.getRelationsCreated();
 	}
 
 	@Setter
