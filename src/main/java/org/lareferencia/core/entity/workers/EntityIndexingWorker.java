@@ -30,6 +30,8 @@ import org.lareferencia.core.entity.indexing.service.EntityIndexingService;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
 import org.lareferencia.core.entity.services.EntityDataService;
+import org.lareferencia.core.entity.services.EntityIndexingStats;
+import org.lareferencia.core.entity.services.EntityLoadingMonitorService;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.worker.BaseBatchWorker;
 import org.lareferencia.core.entity.workers.EntityIndexingRunningContext;
@@ -67,9 +69,14 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 	
 	boolean emptyPage = true;
 
+	@Autowired
+	EntityLoadingMonitorService entityMonitorService;
+
 	public EntityIndexingWorker() {
 		super();
 	}
+
+
 
 	@Override
 	public void preRun() {
@@ -112,13 +119,18 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 			// Delete or index depending
 			if (runningContext.getDeleteMode())
 				indexer.delete(entity.getId().toString());
-			else
+			else {
+
 				indexer.index(entity);
+				entityMonitorService.addIndexedEntity(entity.getId(), entity.getEntityTypeId());
+
+			}
 
 			emptyPage = false;
 
 		} catch (Exception e) {
 
+			entityMonitorService.addIndexedEntityError(entity.getId(), e.getMessage());
 			String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
 			logError(msg);
 		}
