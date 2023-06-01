@@ -46,4 +46,21 @@ public class EntityLoadingStats {
         this.relationsCreated += other.relationsCreated;
     }
 
+    public void reset() {
+        this.sourceEntitiesLoaded = 0L;
+        this.entitiesCreated = 0L;
+        this.entitiesDuplicated = 0L;
+        this.sourceRelationsLoaded = 0L;
+        this.relationsCreated = 0L;
+    }
+
+    @Override
+    public String toString() {
+        return "\nLoading Stats" +
+                "\n\t" + sourceEntitiesLoaded + " source entities loaded" +
+                "\n\t" + entitiesCreated + " entities created" +
+                "\n\t" + entitiesDuplicated + " entities duplicated" +
+                "\n\t" + sourceRelationsLoaded + " source relations loaded" +
+                "\n\t" + relationsCreated + " relations created";
+    }
 }

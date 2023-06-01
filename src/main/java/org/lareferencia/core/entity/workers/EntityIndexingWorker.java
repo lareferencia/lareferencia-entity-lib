@@ -122,7 +122,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 			else {
 
 				indexer.index(entity);
-				entityMonitorService.addIndexedEntity(entity.getId(), entity.getEntityTypeId());
+				entityMonitorService.addEntitySentToIndex(entity.getId(), entity.getEntityTypeId());
 
 			}
 
@@ -130,7 +130,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 
 		} catch (Exception e) {
 
-			entityMonitorService.addIndexedEntityError(entity.getId(), e.getMessage());
+			entityMonitorService.reportEntityIndexingError(entity.getId(), e.getMessage());
 			String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
 			logError(msg);
 		}

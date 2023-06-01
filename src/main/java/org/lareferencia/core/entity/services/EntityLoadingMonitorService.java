@@ -40,7 +40,6 @@ public class EntityLoadingMonitorService {
 		return loadingProcessInProgress;
 	}
 
-
 	EntityLoadingStats entityLoadingStats = new EntityLoadingStats();
 
 	@ManagedAttribute(description = "Source Entities Loaded")
@@ -130,9 +129,12 @@ public class EntityLoadingMonitorService {
 		this.totalProcessedFiles = 0L;
 		this.totalSuccessfulFiles = 0L;
 		this.totalFailedFiles = 0L;
-		this.processingErrorsCount = new ConcurrentHashMap<String,Long>();
-		this.processingErrorsFiles = new ConcurrentHashMap<String,ArrayList<String>>();
-		this.entityLoadingStats = new EntityLoadingStats();
+
+		this.processingErrorsCount.clear();
+		this.processingErrorsFiles.clear();
+
+		this.entityLoadingStats.reset();
+		this.indexingStats.reset();
 
 	}	
 
@@ -180,23 +182,36 @@ public class EntityLoadingMonitorService {
 
 	/*** Indexing Stats ***/
 
-	private EntityIndexingStats indexedEntitiesStats = new EntityIndexingStats();
+	private EntityIndexingStats indexingStats = new EntityIndexingStats();
 
 	@ManagedAttribute(description = "Indexing::All Entities Sent to Indexing")
 	public Integer getAllEntitiesSentToIndexCount() {
-		return indexedEntitiesStats.getAllSentEntitiesCount();
+		return indexingStats.getAllSentEntitiesCount();
 	}
 
 	@ManagedAttribute(description = "Indexing::Unique Entities Sent to Indexing")
 	public Integer getUniqueEntitiesSentToIndexCount() {
-		return indexedEntitiesStats.getUniqueSentEntitiesCount();
+		return indexingStats.getUniqueSentEntitiesCount();
 	}
 
 	public void addEntitySentToIndex(UUID entityId, Long type) {
-		this.indexedEntitiesStats.addEntitySentToIndex(entityId, type);
+		this.indexingStats.addEntitySentToIndex(entityId, type);
 	};
 
 	public void reportEntityIndexingError(UUID entityId, String message) {
-		this.indexedEntitiesStats.registerErrorStat(entityId, message);
+		this.indexingStats.registerErrorStat(entityId, message);
 	};
+
+	public String loadingReport() {
+		return "\n Loading Report [ \n"
+				+ "\n entityLoadingStats:" + entityLoadingStats
+				+ "\n totalProcessedFiles=" + totalProcessedFiles
+				+ "\n totalSuccessfulFiles=" + totalSuccessfulFiles
+				+ "\n totalFailedFiles=" + totalFailedFiles;
+	}
+
+	public String indexingReport() {
+		return "\n Indexing Report  \n"
+				+ "\n indexingStats=" + indexingStats;
+	}
 }
