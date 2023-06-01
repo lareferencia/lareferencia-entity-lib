@@ -203,8 +203,7 @@ public class EntityLoadingMonitorService {
 	};
 
 	public String loadingReport() {
-		return "\n Loading Report [ \n"
-				+ "\n entityLoadingStats:" + entityLoadingStats
+		return  "\n " + entityLoadingStats
 				+ "\n totalProcessedFiles=" + totalProcessedFiles
 				+ "\n totalSuccessfulFiles=" + totalSuccessfulFiles
 				+ "\n totalFailedFiles=" + totalFailedFiles;
