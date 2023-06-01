@@ -221,35 +221,51 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	}
 	
 	private void processAttributeList(List<AttributeIndexingConfig> attributeConfigs, 
-								Map<String, Collection<FieldOccurrence>> occurrences, 
-								String elementId, boolean fromRelation) {
-		
-		for (AttributeIndexingConfig attributeConfig : attributeConfigs) {	
-			if (!attributeConfig.getSubAttributes().isEmpty()) { //field has subfields
-				List<AttributeIndexingConfig> subAttributes = attributeConfig.getSubAttributes();
-				processAttributeList(subAttributes, occurrences, elementId, fromRelation);
-			}
-			
+			Map<String, Collection<FieldOccurrence>> occurrences, 
+			String elementId, boolean fromRelation) {
+
+		for (AttributeIndexingConfig attributeConfig : attributeConfigs) {				
 			if (occurrences.containsKey(attributeConfig.getName())) {
 				for (FieldOccurrence occr : occurrences.get(attributeConfig.getName())) {
 					try {
-						String occrValue = occr.getValue();
-						String alternativeId = createRandomId(); //in case no available id can be used
-						List<RDFTripleConfig> triplesConfig = attributeConfig.getTargetTriples();
+						String occrValue;
 
-						for (RDFTripleConfig tripleConfig : triplesConfig) {
-							if (fromRelation) {
-								processTargetTriple(tripleConfig, occrValue, null, elementId, null, alternativeId);
+						if (!attributeConfig.getSubAttributes().isEmpty()) { //field has subfields
+							List<AttributeIndexingConfig> subAttributes = attributeConfig.getSubAttributes();
+							
+							for (AttributeIndexingConfig subAttribute : subAttributes) { //process each subfield
+								occrValue = occr.getValue(subAttribute.getName());
+								if (occrValue != null) {
+									processAttribute(occrValue, subAttribute, elementId, fromRelation);
+								}	
 							}
-							else {
-								processTargetTriple(tripleConfig, occrValue, elementId, null, null, alternativeId);
-							}
+
+						}
+						else { //simple field
+							occrValue = occr.getValue();
+							processAttribute(occrValue, attributeConfig, elementId, fromRelation);
 						}
 					} catch (EntityRelationException e) {
 						logger.error("Error mapping attribute: " + attributeConfig.getName() + "::" + e.getMessage());
 					}
 				}
 			}	
+		}
+	}
+	
+	private void processAttribute (String occrValue, AttributeIndexingConfig attributeConfig,
+			String elementId, boolean fromRelation) {
+
+		String alternativeId = createRandomId(); //in case no available id can be used
+		List<RDFTripleConfig> triplesConfig = attributeConfig.getTargetTriples();
+
+		for (RDFTripleConfig tripleConfig : triplesConfig) {
+			if (fromRelation) {
+				processTargetTriple(tripleConfig, occrValue, null, elementId, null, alternativeId);
+			}
+			else {
+				processTargetTriple(tripleConfig, occrValue, elementId, null, null, alternativeId);
+			}
 		}
 	}
 	
