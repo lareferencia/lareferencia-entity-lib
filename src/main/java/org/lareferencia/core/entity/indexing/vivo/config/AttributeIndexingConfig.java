@@ -21,13 +21,17 @@
 
 package org.lareferencia.core.entity.indexing.vivo.config;
 
+import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
 
+import javax.xml.bind.annotation.XmlAnyAttribute;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlElement;
 import javax.xml.bind.annotation.XmlElementWrapper;
 import javax.xml.bind.annotation.XmlRootElement;
+import javax.xml.namespace.QName;
 
 import lombok.Setter;
 
@@ -36,6 +40,8 @@ import lombok.Setter;
 public class AttributeIndexingConfig {
 	
 	String name;
+	String filter;
+	Map<QName,String> qnameParams = new HashMap<QName,String>();
 	
 	@XmlAttribute(name="name", required = true)
 	public String getName() {
@@ -69,6 +75,28 @@ public class AttributeIndexingConfig {
 		for (AttributeIndexingConfig attribute : sourceAttributes) {
 			this.subAttributes.add(attribute);
 		}
+	}
+	
+	@XmlAttribute(name="filter", required = false)
+	public String getFilter() {
+		return filter;
+	}
+	
+	// Get any extra information as params
+	@XmlAnyAttribute
+	public Map<QName,String> getQnameParams() {
+		return qnameParams;
+	}
+
+	// Translates the qnameParams to a Map<String,String>
+	public Map<String,String> getParams() {
+		Map<String,String> params = new HashMap<String,String>();
+
+		for ( QName qname : qnameParams.keySet() ) {
+			params.put(qname.getLocalPart(), qnameParams.get(qname));
+		}
+
+		return params;
 	}
 
 }

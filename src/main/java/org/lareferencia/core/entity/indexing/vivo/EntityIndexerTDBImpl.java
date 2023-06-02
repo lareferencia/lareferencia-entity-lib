@@ -48,6 +48,9 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 				
 			logger.info("RDF Mapping Config File: " + configFilePath + " loaded.");
 			
+			// load filters for field occurrence filtering
+			loadOccurFilters();
+			
 			try {
 				OutputConfig tdb = getOutputsByType(outputs, "triplestore").get(0);
 				graph = tdb.getGraph();				
@@ -79,7 +82,9 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		
 		dataset.begin(ReadWrite.WRITE);
 		
-		try {		
+		try {	
+			logger.info("Reset option set to true. Clearing graph...");
+			
 			setTDBModel();
 			m.removeAll();
 			dataset.commit();
