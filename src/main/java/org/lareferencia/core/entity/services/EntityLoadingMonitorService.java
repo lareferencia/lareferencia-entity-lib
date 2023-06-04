@@ -173,7 +173,8 @@ public class EntityLoadingMonitorService {
 		String reportFilePath = originalFileName + REPORT_NAME + new SimpleDateFormat(DD_MM_YYYY_HH_MM_SS).format(new Date()) + JSON;
 
 		try {
-			mapper.writeValue(new File(reportFilePath), this);
+			//mapper.writeValue(new File(reportFilePath), this);
+			mapper.writerWithDefaultPrettyPrinter().writeValue(new File(reportFilePath), this);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -210,7 +211,6 @@ public class EntityLoadingMonitorService {
 	}
 
 	public String indexingReport() {
-		return "\n Indexing Report  \n"
-				+ "\n indexingStats=" + indexingStats;
+		return "\n Indexing Report  " + indexingStats;
 	}
 }
