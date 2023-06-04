@@ -30,6 +30,8 @@ import org.lareferencia.core.entity.indexing.service.EntityIndexingService;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
 import org.lareferencia.core.entity.services.EntityDataService;
+import org.lareferencia.core.entity.services.EntityIndexingStats;
+import org.lareferencia.core.entity.services.EntityLoadingMonitorService;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.worker.BaseBatchWorker;
 import org.lareferencia.core.entity.workers.EntityIndexingRunningContext;
@@ -67,29 +69,47 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 	
 	boolean emptyPage = true;
 
+	@Autowired
+	EntityLoadingMonitorService entityMonitorService;
+
 	public EntityIndexingWorker() {
 		super();
 	}
+
+
 
 	@Override
 	public void preRun() {
 		
 		try { 
 
-			if ( runningContext.getEntityType() != null )
-				entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType() );
-			else 
-				entityPaginator = new EntityPaginator(entityRepository );
-			
+			if ( runningContext.getEntityType() != null ) {
+
+				if (runningContext.getProvenanceSource() != null ) {
+					logger.info("Getting entities of type: " + runningContext.getEntityType() + " and provenance source: " + runningContext.getProvenanceSource());
+					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getProvenanceSource());
+				} else {
+					logger.info("Getting entities of type: " + runningContext.getEntityType());
+					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
+				}
+
+			}
+			else {
+				logger.info("Getting all entities");
+				entityPaginator = new EntityPaginator(entityRepository);
+			}
+
 			// set page size
 			entityPaginator.setPageSize(runningContext.getPageSize());
 			entityPaginator.setActualPage(runningContext.getFromPage());
 			
-			this.setPaginator(entityPaginator);			
+			this.setPaginator(entityPaginator);
+			logger.info("Total pages of size: " + entityPaginator.getPageSize()  +  " to index: " + entityPaginator.getTotalPages());
+
 			indexer = indexingService.getIndexer(runningContext.getIndexingConfigFile(), runningContext.getIndexerBeanName());
 			
 		} catch (Exception e) {
-			logError("Error in Entity Relation Indexing: " + runningContext.toString() + " :: " + e.getMessage());
+			logError("Error in Entity Indexing: " + runningContext.toString() + " :: " + e.getMessage());
 			error();
 		}
 	}
@@ -112,13 +132,18 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 			// Delete or index depending
 			if (runningContext.getDeleteMode())
 				indexer.delete(entity.getId().toString());
-			else
+			else {
+
 				indexer.index(entity);
+				entityMonitorService.addEntitySentToIndex(entity.getId(), entity.getEntityTypeId());
+
+			}
 
 			emptyPage = false;
 
 		} catch (Exception e) {
 
+			entityMonitorService.reportEntityIndexingError(entity.getId(), e.getMessage());
 			String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
 			logError(msg);
 		}

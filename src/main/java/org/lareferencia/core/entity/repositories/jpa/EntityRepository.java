@@ -39,62 +39,62 @@ import org.springframework.data.rest.core.annotation.RestResource;
 public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	
 	
-	Page<Entity> findByEntityType(EntityType type, Pageable pageable);
+
 
 	Page<Entity> findBySemanticIdentifiers_Identifier(String semanticIdentifier, Pageable pageable);
 	
 	@Query(value="SELECT entity.* FROM entity, semantic_identifier s WHERE s.entity_id = entity.uuid and s.semantic_id = ?1", nativeQuery=true)
 	List<Entity> findBySemanticIdentifierStrId(String semanticIdentifier);
-	
+
 	@Query(value="SELECT entity.* FROM entity, semantic_identifier s WHERE entity.duplicate_type = 0 and s.entity_id = entity.uuid and s.semantic_id = ?1", nativeQuery=true)
 	Set<Entity> findNonDuplicateEntitiesBySemanticIdentifierStrId(String semanticIdentifier);
-	
-	
+
+
 	@Query(value="SELECT entity.* FROM entity, semantic_identifier s WHERE s.entity_id = entity.uuid and s.semantic_id in (?1)", nativeQuery=true)
 	Set<Entity> findByAnySemanticIdentifierStrId(List<String> semanticIdentifiers);
-	
+
 	@Query(value="SELECT entity.* FROM entity WHERE entity.uuid IN (?1)", nativeQuery=true)
 	Set<Entity> findByEntityIds(List<UUID> entityIds);
-	
-	@Query(value="SELECT e.* " + 
+
+	@Query(value="SELECT e.* " +
 			"FROM provenance p, source_entity se, entity e " + 
 			"WHERE p.source_id = ?1 AND p.record_id = ?2 " + 
 			"AND se.deleted = FALSE AND se.provenance_id = p.id AND se.final_entity_id = e.uuid AND e.dirty = FALSE;", nativeQuery = true)
-	List<Entity> findByProvenaceSourceAndRecordId(String sourceId, String recordId);
-	
-	@Query(value="SELECT s.finalEntity " + 
-			"FROM SourceEntity s " + 
-			"WHERE s.provenance.source = ?1 AND s.deleted = FALSE AND s.finalEntity.dirty = FALSE")  
-	Page<Entity> findEntitiesByProvenaceSource(String sourceId, Pageable pageable);
-	
-	@Query(value="SELECT s.finalEntity " + 
-			"FROM SourceEntity s " + 
-			"WHERE s.provenance.source = ?1 AND s.deleted = FALSE AND s.finalEntity.dirty = FALSE AND s.finalEntity.entityTypeId = ?2")  
-	Page<Entity> findEntitiesByEntityTypeIdAndProvenaceSource(String sourceId, Long entityTypeId, Pageable pageable);
-		
-	
+	List<Entity> findByProvenanceSourceAndRecordId(String sourceId, String recordId);
+
+
+	// Entity Paginator methods
+
+	Page<Entity> findDistinctEntityByDirtyAndEntityType(Boolean dirty, EntityType type, Pageable pageable);
+
+	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_Source(Boolean dirty, String source, Pageable pageable);
+
+	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_Source(Boolean Dirty, Long entityTypeId, String source, Pageable pageable);
+
+	// End Entity Paginator methods
+
 	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
 	Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
-	
+
 	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.id.relationTypeId = ?2")
 	Page<Entity> findRelatedToEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
-	
+
 	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.name = ?2")
 	Page<Entity> findRelatedFromEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
-	
+
 	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.name = ?2")
 	Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
-//	
+
 	
 	/*** Hidden in rest **/
 
-	@RestResource(exported = false)
-	@Query(value="(select to_entity_id from relation\n" + 
-			"where from_entity_id = '?1' and relation_type_id = ?2)\n" + 
-			"union\n" + 
-			"(select from_entity_id from relation\n" + 
-			"where to_entity_id = '?1' and relation_type_id = ?2)", nativeQuery=true)
-	Set<UUID> findRelatedEntitiesIdsByEntityIdAndRelationID(UUID entityId, Long relationId);
+//	@RestResource(exported = false)
+//	@Query(value="(select to_entity_id from relation\n" +
+//			"where from_entity_id = '?1' and relation_type_id = ?2)\n" +
+//			"union\n" +
+//			"(select from_entity_id from relation\n" +
+//			"where to_entity_id = '?1' and relation_type_id = ?2)", nativeQuery=true)
+//	Set<UUID> findRelatedEntitiesIdsByEntityIdAndRelationID(UUID entityId, Long relationId);
 	
 	@RestResource(exported = false)
 	@Query(value="SELECT entity.entity_type_id FROM entity WHERE entity.uuid = ?1", nativeQuery=true)

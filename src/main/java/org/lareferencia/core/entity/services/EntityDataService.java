@@ -65,8 +65,6 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.Pageable;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -282,9 +280,9 @@ public class EntityDataService {
 
 			// if the entity is new, increment entities stats, if not, increment duplications found stats
 			if (!findOrCreateFinalEntityResult.entityAlreadyExists)
-				stats.incrementEntities(); // increment entities stats because the entity is new
+				stats.incrementEntitiesCreated(); // increment entities stats because the entity is new
 			else	
-				stats.incrementDuplicationsFound(); // increment duplications found stats because the entity already exists
+				stats.incrementEntitiesDuplicated(); // increment duplications found stats because the entity already exists
 		
 			// set that entity as final entity for this source entity
 			sourceEntity.setFinalEntity(findOrCreateFinalEntityResult.entity);
@@ -297,7 +295,7 @@ public class EntityDataService {
 			if (!dryRun) // if not dry run, save source entity
 				sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
 
-			stats.incrementSourceEntities(); // increment stats
+			stats.incrementSourceEntitiesLoaded(); // increment stats
 
 
 			// copy semantic ids from source to entity
@@ -327,7 +325,7 @@ public class EntityDataService {
 			if (!dryRun) // if not dry run, save source relation
 				sourceRelationRepository.save(sourceRelation);
 
-			stats.incrementSourceRelations(); // increment stats
+			stats.incrementSourceRelationsLoaded(); // increment stats
 
 			profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
 
@@ -513,11 +511,11 @@ public class EntityDataService {
 	}
 
 	public List<Entity> findEntitiesByProvenanceSourceAndRecordId(String sourceId, String recordId) {
-		return entityRepository.findByProvenaceSourceAndRecordId(sourceId, recordId);
+		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
 	}
 
-	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
-		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
-	}
+//	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
+//		return entityRepository.findEntitiesByProvenaceSource(sourceId, pageable);
+//	}
 
 }

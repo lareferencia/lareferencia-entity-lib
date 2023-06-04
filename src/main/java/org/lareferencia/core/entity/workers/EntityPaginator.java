@@ -109,12 +109,12 @@ public class EntityPaginator implements IPaginator<Entity> {
 		
 		if ( entityType != null )
 			if ( provenanceSource != null )
-				page = entityRepository.findEntitiesByEntityTypeIdAndProvenaceSource(provenanceSource, entityType.getId(), pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_Source(false, entityType.getId(), provenanceSource, pageable);
 			else
-				page = entityRepository.findByEntityType(entityType, pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndEntityType(false, entityType, pageable);
 		else
 			if ( provenanceSource != null )
-				page = entityRepository.findEntitiesByProvenaceSource(provenanceSource, pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_Source(false, provenanceSource, pageable);
 			else
 				page = entityRepository.findAll(pageable);
 		
