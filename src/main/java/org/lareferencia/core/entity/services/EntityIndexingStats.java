@@ -77,11 +77,10 @@ public class EntityIndexingStats {
 
     @Override
     public String toString() {
-        return "\nIndexing Stats" +
-                "\n\t" + "Total Sent Entities: " + getAllSentEntitiesCount() +
+        return  "\n\t" + "Total Sent Entities: " + getAllSentEntitiesCount() +
                 "\n\t" + "Total Unique Sent Entities: " + getUniqueSentEntitiesCount() +
-                "\n\t" + "Total Entities w/ Indexing Errors" + getAllErrorsCount() +
-                "\n\t" + "Total Unique Entities w/ Indexing Errors" + getUniqueErrorsCount() +
+                "\n\t" + "Total Entities w/ Indexing Errors: " + getAllErrorsCount() +
+                "\n\t" + "Total Unique Entities w/ Indexing Errors: " + getUniqueErrorsCount() +
                 "\n";
     }
 }
