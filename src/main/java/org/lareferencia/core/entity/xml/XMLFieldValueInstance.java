@@ -43,6 +43,7 @@ public class XMLFieldValueInstance implements IFieldValueInstance {
 	private String name;
 	private String lang;
 	private String value;
+	private Boolean preferred;
 	
 	private List<XMLFieldValueInstance> fields = new LinkedList<XMLFieldValueInstance>();
 	
@@ -50,6 +51,7 @@ public class XMLFieldValueInstance implements IFieldValueInstance {
 		super();
 		this.name = name;
 		this.value = value;
+		this.preferred = false;
 	}
 	
 	public XMLFieldValueInstance(String name, String lang, String value) {
@@ -57,6 +59,15 @@ public class XMLFieldValueInstance implements IFieldValueInstance {
 		this.name = name;
 		this.lang = lang;
 		this.value = value;
+		this.preferred = false;
+	}
+
+	public XMLFieldValueInstance(String name, String lang, String value, Boolean preferred) {
+		super();
+		this.name = name;
+		this.lang = lang;
+		this.value = value;
+		this.preferred = preferred;
 	}
 	
 	public XMLFieldValueInstance() {
@@ -78,11 +89,17 @@ public class XMLFieldValueInstance implements IFieldValueInstance {
 	public String getValue() {
 		return value;
 	}
+
+	@XmlAttribute
+	public Boolean getPreferred() {
+		return preferred;
+	}
 	
 	@XmlElement(name="field")
 	public List<XMLFieldValueInstance> getFields() {
 		return fields;
 	}
-	
+
+
 }
 

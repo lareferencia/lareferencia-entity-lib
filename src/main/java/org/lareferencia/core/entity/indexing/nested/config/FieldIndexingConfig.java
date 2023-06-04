@@ -79,6 +79,13 @@ public class FieldIndexingConfig {
 		return sortable;
 	}
 
+	// Preferred values only is used to filter the values that are not preferred
+	Boolean preferredValuesOnly = false;
+	@XmlAttribute(name="preferred-values-only", required = false)
+	public Boolean getPreferredValuesOnly() {
+		return preferredValuesOnly;
+	}
+
 	String filter;
 	@XmlAttribute(name="filter", required = false)
 	public String getFilter() {

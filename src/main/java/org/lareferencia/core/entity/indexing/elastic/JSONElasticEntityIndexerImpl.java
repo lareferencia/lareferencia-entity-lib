@@ -545,6 +545,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			filterParams.put("field", config.getSourceField());
 			filterParams.put("subfield", config.getSourceSubfield());
 
+			// check if preferred flag is set and add it to the params
+			if ( config.getPreferredValuesOnly() )
+				filterParams.put("preferred", "true");
+
 			occurrences = fieldOccurrenceFilterService.filter(occurrences, config.getFilter(), filterParams);
 		}
 
