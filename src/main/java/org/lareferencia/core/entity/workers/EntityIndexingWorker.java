@@ -83,20 +83,33 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 		
 		try { 
 
-			if ( runningContext.getEntityType() != null )
-				entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType() );
-			else 
-				entityPaginator = new EntityPaginator(entityRepository );
-			
+			if ( runningContext.getEntityType() != null ) {
+
+				if (runningContext.getProvenanceSource() != null ) {
+					logger.info("Getting entities of type: " + runningContext.getEntityType() + " and provenance source: " + runningContext.getProvenanceSource());
+					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getProvenanceSource());
+				} else {
+					logger.info("Getting entities of type: " + runningContext.getEntityType());
+					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
+				}
+
+			}
+			else {
+				logger.info("Getting all entities");
+				entityPaginator = new EntityPaginator(entityRepository);
+			}
+
 			// set page size
 			entityPaginator.setPageSize(runningContext.getPageSize());
 			entityPaginator.setActualPage(runningContext.getFromPage());
 			
-			this.setPaginator(entityPaginator);			
+			this.setPaginator(entityPaginator);
+			logger.info("Total pages of size: " + entityPaginator.getPageSize()  +  " to index: " + entityPaginator.getTotalPages());
+
 			indexer = indexingService.getIndexer(runningContext.getIndexingConfigFile(), runningContext.getIndexerBeanName());
 			
 		} catch (Exception e) {
-			logError("Error in Entity Relation Indexing: " + runningContext.toString() + " :: " + e.getMessage());
+			logError("Error in Entity Indexing: " + runningContext.toString() + " :: " + e.getMessage());
 			error();
 		}
 	}
