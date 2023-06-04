@@ -56,24 +56,22 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	@Query(value="SELECT entity.* FROM entity WHERE entity.uuid IN (?1)", nativeQuery=true)
 	Set<Entity> findByEntityIds(List<UUID> entityIds);
 
-	Page<Entity> findByEntityType(EntityType type, Pageable pageable);
-
-	@Query(value="SELECT e.* " + 
+	@Query(value="SELECT e.* " +
 			"FROM provenance p, source_entity se, entity e " + 
 			"WHERE p.source_id = ?1 AND p.record_id = ?2 " + 
 			"AND se.deleted = FALSE AND se.provenance_id = p.id AND se.final_entity_id = e.uuid AND e.dirty = FALSE;", nativeQuery = true)
 	List<Entity> findByProvenanceSourceAndRecordId(String sourceId, String recordId);
-	
-	@Query(value="SELECT s.finalEntity " + 
-			"FROM SourceEntity s " + 
-			"WHERE s.provenance.source = ?1 AND s.deleted = FALSE AND s.finalEntity.dirty = FALSE")  
-	Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable);
-	
-	@Query(value="SELECT s.finalEntity " + 
-			"FROM SourceEntity s " + 
-			"WHERE s.provenance.source = ?1 AND s.deleted = FALSE AND s.finalEntity.dirty = FALSE AND s.finalEntity.entityTypeId = ?2")  
-	Page<Entity> findEntitiesByEntityTypeIdAndProvenanceSource(String sourceId, Long entityTypeId, Pageable pageable);
-		
+
+
+	// Entity Paginator methods
+
+	Page<Entity> findDistinctEntityByDirtyAndEntityType(Boolean dirty, EntityType type, Pageable pageable);
+
+	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_Source(Boolean dirty, String source, Pageable pageable);
+
+	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_Source(Boolean Dirty, Long entityTypeId, String source, Pageable pageable);
+
+	// End Entity Paginator methods
 
 	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
 	Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
