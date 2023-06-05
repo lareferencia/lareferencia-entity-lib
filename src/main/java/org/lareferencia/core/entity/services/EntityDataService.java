@@ -403,7 +403,7 @@ public class EntityDataService {
 				FieldType fieldType = type.getFieldByName(fieldName);
 				container.addFieldOccurrence(fieldOcurrenceCachedStore.loadOrCreate(fieldType, field));
 			} catch (EntityRelationException e) {
-				logger.info("Ignoring field: " + fieldName + " :: " + e.getMessage());
+				throw new EntitiyRelationXMLLoadingException("Unknown fieldName found in data :: " + e.getMessage());
 			}
 		}
 	}
