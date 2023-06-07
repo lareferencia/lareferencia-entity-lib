@@ -51,6 +51,9 @@ public class EntityIndexerVivoImpl extends AbstractEntityIndexerRDF implements I
 				
 			logger.info("RDF Mapping Config File: " + configFilePath + " loaded.");
 			
+			// load filters for field occurrence filtering
+			loadOccurFilters();
+			
 			try {
 				OutputConfig endpoint = getOutputsByType(outputs, "post").get(0);
 				targetUrl = endpoint.getUrl();
