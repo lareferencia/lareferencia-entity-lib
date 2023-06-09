@@ -27,6 +27,7 @@ public interface IFieldValueInstance {
 	public String getName();
 	public String getLang();
 	public String getValue();
+	public Boolean getPreferred();
 	List<? extends IFieldValueInstance> getFields();
 	
 }

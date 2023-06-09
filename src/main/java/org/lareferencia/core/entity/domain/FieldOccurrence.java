@@ -88,6 +88,10 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 	@EqualsAndHashCode.Include
 	protected String lang = null;
 
+	@JsonInclude(Include.NON_NULL)
+	@EqualsAndHashCode.Include
+	protected Boolean preferred = false;
+
 	@JsonIgnore
 	public String getFieldName() {
 		return fieldType.getName();
@@ -98,6 +102,7 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 		this.fieldType = fieldType;
 		this.fieldTypeId = fieldType.getId();
 		this.lang = NO_LANG;
+		this.preferred = false;
 	}
 
 	public abstract Object getContent();
@@ -108,7 +113,8 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 
 	@Override
 	public String toString() {
-		return fieldTypeId + "::" + lang + "::" + getContent();
+		// only add preferred if it is true, this to preserve backward compatibility
+		return fieldTypeId + "::" + lang + "::" + getContent() + (preferred ? ( "::" + preferred ) : "");
 	}
 
 	public Long hashCodeLong() {
@@ -139,6 +145,12 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 		} else if (!fieldTypeId.equals(other.fieldTypeId))
 			return false;
 
+		if (preferred == null) {
+			if (other.preferred != null)
+				return false;
+		} else if (!preferred.equals(other.preferred))
+			return false;
+
 		if (lang == null) {
 			if (other.lang != null)
 				return false;
@@ -160,6 +172,11 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 		int result = 1;
 		result = prime * result + ((fieldTypeId == null) ? 0 : fieldTypeId.hashCode());
 		result = prime * result + ((lang == null) ? 0 : lang.hashCode());
+
+		// only add preferred if it is true, this to preserve backward compatibility
+		if ( preferred )
+			result = prime * result + ((preferred == null) ? 0 : preferred.hashCode());
+
 		return result;
 	}
 
