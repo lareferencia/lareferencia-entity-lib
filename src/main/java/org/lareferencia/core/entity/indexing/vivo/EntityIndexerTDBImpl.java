@@ -3,10 +3,22 @@ package org.lareferencia.core.entity.indexing.vivo;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+import org.apache.jena.query.QueryExecution;
+import org.apache.jena.query.QueryExecutionFactory;
+import org.apache.jena.query.QuerySolution;
 import org.apache.jena.query.ReadWrite;
+import org.apache.jena.query.ResultSet;
+import org.apache.jena.rdf.model.Model;
+import org.apache.jena.rdf.model.ModelFactory;
+import org.apache.jena.rdf.model.Property;
+import org.apache.jena.rdf.model.RDFNode;
+import org.apache.jena.rdf.model.Resource;
+import org.apache.jena.rdf.model.Statement;
+import org.apache.jena.rdf.model.StmtIterator;
 import org.apache.jena.tdb.TDBFactory;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.indexing.vivo.config.EntityIndexingConfig;
@@ -15,6 +27,8 @@ import org.lareferencia.core.entity.indexing.vivo.config.NamespaceConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.OutputConfig;
 
 public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IEntityIndexer {
+	
+	private static final int PAGE_SIZE = 1000000;
 	
 	@Override
 	public void flush() {
@@ -70,7 +84,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 				logger.info("Using TDB triplestore at " + directory);
 			
 			} catch (Exception e) {
-				logger.error("No output of type 'triplestore' defined in the config file.");
+				e.printStackTrace();;
 			}
 			 	
 		} catch (Exception e) {
@@ -78,22 +92,82 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		}
 	}	
 	
-	private void clearDataset() {
+	private StmtIterator getModelPage() {
 		
-		dataset.begin(ReadWrite.WRITE);
+		Model submodel = ModelFactory.createDefaultModel();
+		String query = "SELECT ?s ?p ?o WHERE {?s ?p ?o .} LIMIT " + PAGE_SIZE;
+		
+		dataset.begin(ReadWrite.READ);
 		
 		try {	
-			logger.info("Reset option set to true. Clearing graph...");
-			
 			setTDBModel();
-			m.removeAll();
-			dataset.commit();
-			
-			logger.info("Graph cleared inside triplestore.");
+		
+			QueryExecution qe = QueryExecutionFactory.create(query, m);
+			ResultSet resultSet = qe.execSelect();
+
+			while (resultSet.hasNext()) {
+				QuerySolution next = resultSet.next();
+				Resource subject = next.getResource("?s");
+				Property predicate = submodel.createProperty(next.get("?p").toString());
+				RDFNode object = next.get("?o");
+
+				submodel.add(subject, predicate, object);
+			}
+		}
+		catch (Exception e) {
+			e.printStackTrace();
+		}
+		finally { 
+			dataset.end(); 
+		}
+		
+		return submodel.listStatements();
+	}
+	
+	private long getModelSize() {
+		
+		long modelSize = 0;
+		
+		dataset.begin(ReadWrite.READ);
+		
+		try {	
+			setTDBModel();
+			modelSize = m.size();
 		}
 		finally { 
 			dataset.end(); 
 		}	
+		return modelSize;
+	}
+	
+	private void clearDataset() {
+		
+		logger.info("Reset option set to true. Clearing graph...");
+		
+		int removed = 0;
+		int page = 1;
+		long totalTriples = getModelSize();
+		
+		while (removed < totalTriples) {
+			StmtIterator modelPage = getModelPage();
+			
+			dataset.begin(ReadWrite.WRITE);
+			
+			try {			
+				setTDBModel();
+				m.remove(modelPage);
+				dataset.commit();
+				removed = PAGE_SIZE * page++;
+			}	
+			catch (Exception e) {
+				e.printStackTrace();
+			}
+			finally { 
+				dataset.end(); 		
+			}
+		}
+		
+		logger.info("Graph cleared inside triplestore.");
 	}
 	
 	private void writeRDFModel(String outputFilePath, String format) {
