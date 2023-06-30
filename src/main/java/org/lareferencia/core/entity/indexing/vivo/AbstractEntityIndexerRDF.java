@@ -26,6 +26,7 @@ import org.lareferencia.core.entity.domain.EntityType;
 import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.Relation;
 import org.lareferencia.core.entity.domain.RelationType;
+import org.lareferencia.core.entity.indexing.filters.FieldOccurrenceFilterService;
 import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.indexing.vivo.config.AttributeIndexingConfig;
@@ -39,6 +40,7 @@ import org.lareferencia.core.entity.indexing.vivo.config.RDFTripleConfig.TripleS
 import org.lareferencia.core.entity.indexing.vivo.config.RelationIndexingConfig;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationContext;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
@@ -68,6 +70,13 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	protected boolean persist;
 	protected Dataset dataset;
 	protected Model m;
+	
+	@Autowired
+	ApplicationContext context;
+	
+	// this will be used to filter out fields that are not to be indexed
+	// will be injected by spring context on set config method
+	FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
 	@Override
 	public void index(Entity entity) throws EntityIndexingException {
@@ -160,6 +169,24 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 		}
 	}
 	
+	/**
+	 * loads the field occurrence filters from spring context and injects them into the service
+	 */
+	public void loadOccurFilters() {
+		// Load dynamic field occurrence filters from spring context
+		try {
+			// get the service from spring context
+			fieldOccurrenceFilterService = FieldOccurrenceFilterService.getServiceInstance(context);
+			if ( fieldOccurrenceFilterService != null )
+				// load the filters from spring context
+				fieldOccurrenceFilterService.loadFiltersFromApplicationContext(context);
+
+			logger.debug( "fieldOccurrenceFilterService: " + fieldOccurrenceFilterService.getFilters().toString() );
+		} catch (Exception e) {
+			logger.warn("Error loading field occurrence filters: " + e.getMessage());
+		}
+	}
+	
 	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
 		
 		Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
@@ -221,35 +248,64 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	}
 	
 	private void processAttributeList(List<AttributeIndexingConfig> attributeConfigs, 
-								Map<String, Collection<FieldOccurrence>> occurrences, 
-								String elementId, boolean fromRelation) {
-		
-		for (AttributeIndexingConfig attributeConfig : attributeConfigs) {	
-			if (attributeConfig.getSubAttributes() != null) { //field has subfields
-				List<AttributeIndexingConfig> subAttributes = attributeConfig.getSubAttributes();
-				processAttributeList(subAttributes, occurrences, elementId, fromRelation);
-			}
-			
-			if (occurrences.containsKey(attributeConfig.getName())) {
-				for (FieldOccurrence occr : occurrences.get(attributeConfig.getName())) {
-					try {
-						String occrValue = occr.getValue();
-						String alternativeId = createRandomId(); //in case no available id can be used
-						List<RDFTripleConfig> triplesConfig = attributeConfig.getTargetTriples();
+			Map<String, Collection<FieldOccurrence>> occurrences, 
+			String elementId, boolean fromRelation) {
 
-						for (RDFTripleConfig tripleConfig : triplesConfig) {
-							if (fromRelation) {
-								processTargetTriple(tripleConfig, occrValue, null, elementId, null, alternativeId);
+		for (AttributeIndexingConfig attributeConfig : attributeConfigs) {				
+			if (occurrences.containsKey(attributeConfig.getName())) {
+				Collection<FieldOccurrence> fieldOccrs = occurrences.get(attributeConfig.getName());
+				
+				// if field filter is defined and the services is available, apply it
+				if ( fieldOccurrenceFilterService != null && attributeConfig.getFilter() != null ) {
+					// get the params from the config
+					Map<String, String> filterParams = attributeConfig.getParams();
+
+					// add the field name to the params
+					filterParams.put("field", attributeConfig.getName());
+
+					fieldOccrs = fieldOccurrenceFilterService.filter(fieldOccrs, attributeConfig.getFilter(), filterParams);
+				}
+				
+				for (FieldOccurrence fieldOccr : fieldOccrs) {
+					try {
+						String occrValue;
+
+						if (!attributeConfig.getSubAttributes().isEmpty()) { //field has subfields
+							List<AttributeIndexingConfig> subAttributes = attributeConfig.getSubAttributes();
+							
+							for (AttributeIndexingConfig subAttribute : subAttributes) { //process each subfield
+								occrValue = fieldOccr.getValue(subAttribute.getName());
+								if (occrValue != null) {
+									processAttribute(occrValue, subAttribute, elementId, fromRelation);
+								}	
 							}
-							else {
-								processTargetTriple(tripleConfig, occrValue, elementId, null, null, alternativeId);
-							}
+
+						}
+						else { //simple field
+							occrValue = fieldOccr.getValue();
+							processAttribute(occrValue, attributeConfig, elementId, fromRelation);
 						}
 					} catch (EntityRelationException e) {
 						logger.error("Error mapping attribute: " + attributeConfig.getName() + "::" + e.getMessage());
 					}
 				}
 			}	
+		}
+	}
+	
+	private void processAttribute (String occrValue, AttributeIndexingConfig attributeConfig,
+			String elementId, boolean fromRelation) {
+
+		String alternativeId = createRandomId(); //in case no available id can be used
+		List<RDFTripleConfig> triplesConfig = attributeConfig.getTargetTriples();
+
+		for (RDFTripleConfig tripleConfig : triplesConfig) {
+			if (fromRelation) {
+				processTargetTriple(tripleConfig, occrValue, null, elementId, null, alternativeId);
+			}
+			else {
+				processTargetTriple(tripleConfig, occrValue, elementId, null, null, alternativeId);
+			}
 		}
 	}
 	
