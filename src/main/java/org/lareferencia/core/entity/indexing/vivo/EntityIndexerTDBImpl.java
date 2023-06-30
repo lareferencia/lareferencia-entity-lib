@@ -3,7 +3,6 @@ package org.lareferencia.core.entity.indexing.vivo;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
@@ -17,7 +16,6 @@ import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.Property;
 import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
-import org.apache.jena.rdf.model.Statement;
 import org.apache.jena.rdf.model.StmtIterator;
 import org.apache.jena.tdb.TDBFactory;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
@@ -90,7 +88,23 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		} catch (Exception e) {
 			logger.error("RDF Mapping Config File: " + configFilePath + e.getMessage());
 		}
-	}	
+	}
+	
+	private long getModelSize() {
+		
+		long modelSize = 0;
+		
+		dataset.begin(ReadWrite.READ);
+		
+		try {	
+			setTDBModel();
+			modelSize = m.size();
+		}
+		finally { 
+			dataset.end(); 
+		}	
+		return modelSize;
+	}
 	
 	private StmtIterator getModelPage() {
 		
@@ -114,9 +128,6 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 				submodel.add(subject, predicate, object);
 			}
 		}
-		catch (Exception e) {
-			e.printStackTrace();
-		}
 		finally { 
 			dataset.end(); 
 		}
@@ -124,31 +135,15 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		return submodel.listStatements();
 	}
 	
-	private long getModelSize() {
-		
-		long modelSize = 0;
-		
-		dataset.begin(ReadWrite.READ);
-		
-		try {	
-			setTDBModel();
-			modelSize = m.size();
-		}
-		finally { 
-			dataset.end(); 
-		}	
-		return modelSize;
-	}
-	
 	private void clearDataset() {
 		
 		logger.info("Reset option set to true. Clearing graph...");
 		
-		int removed = 0;
+		int offset = 0;
 		int page = 1;
 		long totalTriples = getModelSize();
 		
-		while (removed < totalTriples) {
+		while (offset < totalTriples) {
 			StmtIterator modelPage = getModelPage();
 			
 			dataset.begin(ReadWrite.WRITE);
@@ -157,14 +152,14 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 				setTDBModel();
 				m.remove(modelPage);
 				dataset.commit();
-				removed = PAGE_SIZE * page++;
+				
+				offset = PAGE_SIZE * page++;		
 			}	
-			catch (Exception e) {
-				e.printStackTrace();
-			}
 			finally { 
 				dataset.end(); 		
 			}
+			
+			logger.info("Remaining triples: " + getModelSize());
 		}
 		
 		logger.info("Graph cleared inside triplestore.");
