@@ -43,7 +43,7 @@ public class XMLFieldValueInstance implements IFieldValueInstance {
 	private String name;
 	private String lang;
 	private String value;
-	private Boolean preferred;
+	private Boolean preferred = false;
 	
 	private List<XMLFieldValueInstance> fields = new LinkedList<XMLFieldValueInstance>();
 	
