@@ -48,6 +48,11 @@ public class FieldOcurrenceCachedStore extends ConcurrentCachedStore<Long, Field
             createdFieldOccr.addValue(fieldValue, field.getLang());
         }
 
+        // if is a preferred value, set it
+        if ( field.getPreferred() )
+            createdFieldOccr.setPreferred(field.getPreferred());
+
+        // update the id
         createdFieldOccr.updateId();
 
         FieldOccurrence existingFieldOccr = this.get( createdFieldOccr.getId() );

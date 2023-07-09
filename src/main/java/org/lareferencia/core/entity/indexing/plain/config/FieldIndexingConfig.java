@@ -20,10 +20,15 @@
 
 package org.lareferencia.core.entity.indexing.plain.config;
 
+import javax.xml.bind.annotation.XmlAnyAttribute;
 import javax.xml.bind.annotation.XmlAttribute;
 import javax.xml.bind.annotation.XmlRootElement;
+import javax.xml.namespace.QName;
 
 import lombok.Setter;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @XmlRootElement
 @Setter
@@ -74,7 +79,39 @@ public class FieldIndexingConfig {
 	public Boolean getSortable() {
 		return sortable;
 	}
-	
-	
-		
+
+	// Preferred values only is used to filter the values that are not preferred
+	Boolean preferredValuesOnly = false;
+	@XmlAttribute(name="preferred-values-only", required = false)
+	public Boolean getPreferredValuesOnly() {
+		return preferredValuesOnly;
+	}
+
+	String filter;
+	@XmlAttribute(name="filter", required = false)
+	public String getFilter() {
+		return filter;
+	}
+
+	// This attribute is used to store any extra information
+	Map<QName,String> qnameParams = new HashMap<QName,String>();
+	@XmlAnyAttribute
+	public Map<QName,String> getQnameParams() {
+		return qnameParams;
+	}
+
+	// this translates the qnameParams to a Map<String,String>
+	public Map<String,String> getParams() {
+		Map<String,String> params = new HashMap<String,String>();
+
+		for ( QName qname : qnameParams.keySet() ) {
+			params.put(qname.getLocalPart(), qnameParams.get(qname));
+		}
+
+		return params;
+	}
+
+
+
+
 }

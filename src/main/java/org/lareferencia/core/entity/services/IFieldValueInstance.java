@@ -23,10 +23,11 @@ package org.lareferencia.core.entity.services;
 import java.util.List;
 
 public interface IFieldValueInstance {
-	
-	public String getName();
-	public String getLang();
-	public String getValue();
+	String getName();
+	String getLang();
+	String getValue();
+
+	Boolean getPreferred();
 	List<? extends IFieldValueInstance> getFields();
 	
 }
