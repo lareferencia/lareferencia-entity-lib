@@ -346,7 +346,11 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 			// set the entity fields
 			for (FieldIndexingConfig fieldConfig : config.getIndexFields())
-				processFieldConfig(entity, relationsMap, fieldConfig, jsonEntityElastic);
+				try {
+					processFieldConfig(entity, relationsMap, fieldConfig, jsonEntityElastic);
+				} catch (Exception e) {
+					throw new EntityIndexingException("Error processing field: " + fieldConfig.getName() + " :: " + e.getMessage() );
+				}
 
 		} catch (Exception e) {
 			throw new EntityIndexingException("Error creating JSONElasticEntity: " + config.getName() + " :: " + config.getEntityType() + " from entity: " + entity.getId() + " :: " + e.getMessage() );
