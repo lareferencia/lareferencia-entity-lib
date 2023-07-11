@@ -262,6 +262,10 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 
 					// add the field name to the params
 					filterParams.put("field", attributeConfig.getName());
+					
+					// check if preferred flag is set and add it to the params
+					if (attributeConfig.getPreferredValuesOnly())
+						filterParams.put("preferred", "true");
 
 					fieldOccrs = fieldOccurrenceFilterService.filter(fieldOccrs, attributeConfig.getFilter(), filterParams);
 				}

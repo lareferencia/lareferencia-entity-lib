@@ -42,6 +42,7 @@ public class AttributeIndexingConfig {
 	String name;
 	String filter;
 	Map<QName,String> qnameParams = new HashMap<QName,String>();
+	Boolean preferredValuesOnly = false;
 	
 	@XmlAttribute(name="name", required = true)
 	public String getName() {
@@ -97,6 +98,12 @@ public class AttributeIndexingConfig {
 		}
 
 		return params;
+	}
+	
+	// Preferred values only is used to filter the values that are not preferred		
+	@XmlAttribute(name="preferred-values-only", required = false)
+	public Boolean getPreferredValuesOnly() {
+		return preferredValuesOnly;
 	}
 
 }
