@@ -65,6 +65,8 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 	// Entity Paginator methods
 
+	Page<Entity> findDistinctEntityByDirtyOrderByIdAsc(Boolean dirty, Pageable pageable);
+
 	Page<Entity> findDistinctEntityByDirtyAndEntityTypeOrderByIdAsc(Boolean dirty, EntityType type, Pageable pageable);
 
 	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean dirty, String source, Pageable pageable);
