@@ -161,7 +161,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	
 	public void setTDBModel() {
 		
-		if (graph.isBlank()) {
+		if (graph.isEmpty()) {
 			m = dataset.getDefaultModel();
 		}
 		else {
