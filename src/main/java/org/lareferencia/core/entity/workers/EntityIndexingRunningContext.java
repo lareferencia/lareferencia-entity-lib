@@ -27,6 +27,8 @@ import lombok.Getter;
 import lombok.Setter;
 import org.lareferencia.core.worker.IRunningContext;
 
+import java.time.LocalDateTime;
+
 public class EntityIndexingRunningContext implements IRunningContext {
 	
 	static final String ID_PREFIX = "ENTITY_INDEXING::";
@@ -42,6 +44,10 @@ public class EntityIndexingRunningContext implements IRunningContext {
 	@Getter
 	@Setter
 	String provenanceSource;
+
+	@Getter
+	@Setter
+	LocalDateTime lastUdate = null;
 	
 	
 	@Getter

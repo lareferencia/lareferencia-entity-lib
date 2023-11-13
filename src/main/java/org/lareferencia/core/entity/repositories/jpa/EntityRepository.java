@@ -21,9 +21,12 @@
 package org.lareferencia.core.entity.repositories.jpa;
 
 
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+
+import java.time.LocalDateTime;
 
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
@@ -71,7 +74,12 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean dirty, String source, Pageable pageable);
 
+	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean dirty, LocalDateTime lastUpdate, Pageable pageable);
+
 	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean Dirty, Long entityTypeId, String source, Pageable pageable);
+
+	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean Dirty, Long entityTypeId, LocalDateTime lastUpdate, Pageable pageable);
+
 
 	// End Entity Paginator methods
 

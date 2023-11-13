@@ -89,14 +89,26 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
 					logger.info("Getting entities of type: " + runningContext.getEntityType() + " and provenance source: " + runningContext.getProvenanceSource());
 					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getProvenanceSource());
 				} else {
-					logger.info("Getting entities of type: " + runningContext.getEntityType());
-					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
+					if (runningContext.getLastUdate() != null) {
+						logger.info("Getting entities of type: " + runningContext.getEntityType() + " and last update: " + runningContext.getLastUdate());
+						entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getLastUdate());
+					} else {
+						logger.info("Getting entities of type: " + runningContext.getEntityType());
+						entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
+					}
 				}
+
 
 			}
 			else {
-				logger.info("Getting all entities");
-				entityPaginator = new EntityPaginator(entityRepository);
+
+				if ( runningContext.getLastUdate() != null  ) {
+					logger.info("Getting all entities from last update: " + runningContext.getLastUdate());
+					entityPaginator = new EntityPaginator(entityRepository, runningContext.getLastUdate());
+				} else {
+					logger.info("Getting all entities");
+					entityPaginator = new EntityPaginator(entityRepository);
+				}
 			}
 
 			// set page size
