@@ -32,16 +32,20 @@
 		http://www.springframework.org/schema/tx http://www.springframework.org/schema/tx/spring-tx.xsd
 		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context.xsd">
 
-    <bean id="dateHelper" class="org.lareferencia.core.util.date.DateHelper">
+   <bean id="dateHelper" class="org.lareferencia.core.util.date.DateHelper">
         <property name="dateTimeFormatters">
             <set value-type="org.lareferencia.core.util.date.IDateTimeFormatter">
                 <bean class="org.lareferencia.core.util.date.SystemDateFormatter"/>
                 <bean class="org.lareferencia.core.util.date.YearDateFormatter"/>
                 <bean class="org.lareferencia.core.util.date.YearMonthDateFormatter"/>
                 <bean class="org.lareferencia.core.util.date.YearMonthDayDateFormatter"/>
+                <bean class="org.lareferencia.core.util.date.YearMonthDayHourDateFormatter"/>
             </set>
         </property>
     </bean>
+
+    <bean id="entityDataService" class="org.lareferencia.core.entity.services.EntityDataService"/>
+         
 
 	
 </beans>

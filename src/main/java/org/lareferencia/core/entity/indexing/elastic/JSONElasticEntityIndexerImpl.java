@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -283,27 +284,24 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 						"Error indexing entity: " + entity.getId() + " " + this.indexingConfigFilename
 								+ " does not contain a indexing config for " + type.getName() + " EntityType");
 
-			// get the relations for the entity
-			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
-
+			
 			// create the elastic entity from the entity and the relations
-			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity, relationsMap);
+			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity);
 
 			// get the nested entities and create the related elastic entities
 			for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
 
 				String relationName = nestedEntityConfig.getEntityRelation();
 				// get the relations for the nested entity
-				for (Relation relation : relationsMap.get(relationName)) {
-					//
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-					// get the relations for the related entity
-					Multimap<String, Relation> relatedEntityRelationsMap = this.getRelationMultimap(relatedEntity);
-					// create the related elastic entity
-					JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig, relatedEntity,
-							relatedEntityRelationsMap);
-					// add the related elastic entity to the parent entity
-					elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), relatedElasticEntity);
+				for (Relation relation : entity.getRelationsByType(relationName)) {
+					
+					Optional<Entity> relatedEntityOpt =   entityDataService.getEntityById(relation.getTarget());
+
+					// if the relate entity exists
+					if ( relatedEntityOpt.isPresent() ) {					
+						// build and add the related elastic entity to the parent entity
+						elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), createElasticEntity(nestedEntityConfig, relatedEntityOpt.get()));
+					}
 				}
 			}
 
@@ -324,8 +322,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	 * @param relationsMap
 	 * @throws EntityIndexingException
 	 */
-	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity,
-			Multimap<String, Relation> relationsMap) throws EntityIndexingException {
+	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity) throws EntityIndexingException {
 
 		// create the elastic entity
 		JSONEntityElastic jsonEntityElastic = new JSONEntityElastic();
@@ -347,7 +344,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			// set the entity fields
 			for (FieldIndexingConfig fieldConfig : config.getIndexFields())
 				try {
-					processFieldConfig(entity, relationsMap, fieldConfig, jsonEntityElastic);
+					processFieldConfig(entity, fieldConfig, jsonEntityElastic);
 				} catch (Exception e) {
 					throw new EntityIndexingException("Error processing field: " + fieldConfig.getName() + " :: " + e.getMessage() );
 				}
@@ -484,25 +481,24 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	}
 
-	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
+	// private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
 
-		Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
+	// 	Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
 
-		for (Relation relation : entity.getFromRelations()) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
-			relationsByName.put(rtype.getName(), relation);
-		}
+	// 	for (Relation relation : entity.getFromRelations()) {
+	// 		RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
+	// 		relationsByName.put(rtype.getName(), relation);
+	// 	}
 
-		for (Relation relation : entity.getToRelations()) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
-			relationsByName.put(rtype.getName(), relation);
-		}
+	// 	for (Relation relation : entity.getToRelations()) {
+	// 		RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
+	// 		relationsByName.put(rtype.getName(), relation);
+	// 	}
 
-		return relationsByName;
-	}
+	// 	return relationsByName;
+	// }
 
-	private void processFieldConfig(Entity entity, Multimap<String, Relation> relationsMap, FieldIndexingConfig config,
-			JSONEntityElastic ientity) throws EntityIndexingException {
+	private void processFieldConfig(Entity entity, FieldIndexingConfig config, JSONEntityElastic ientity) throws EntityIndexingException {
 
 
 		String sourceFieldName = config.getSourceField();
@@ -516,15 +512,18 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 		if (config.getSourceRelation() != null) {// is a relation indexing
 
-			for (Relation relation : relationsMap.get(config.getSourceRelation())) {
+			Collection<Relation> relations = entity.getRelationsByType(config.getSourceRelation());
+
+			for (Relation relation : relations) {
 
 				if (config.getSourceMember() != null) { // is a related entity field
 
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
+					Optional<Entity> relatedEntityOpt =   entityDataService.getEntityById(relation.getTarget());
 
-					// add all occrs of the given source field from all entities of type source
-					// member related by source relation
-					processFieldOccurrence(relatedEntity.getFieldOccurrences(sourceFieldName), config, ientity);
+					// add all occrs of the given source field from all entities 
+					
+					if ( relatedEntityOpt.isPresent() )
+						processFieldOccurrence(relatedEntityOpt.get().getFieldOccurrences(sourceFieldName), config, ientity);
 
 				} else {// is a relation attribute
 

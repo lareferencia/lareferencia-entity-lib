@@ -19,112 +19,67 @@
  */
 
 package org.lareferencia.core.entity.domain;
-
-import javax.persistence.Column;
-import javax.persistence.DiscriminatorColumn;
-import javax.persistence.FetchType;
-import javax.persistence.Id;
-import javax.persistence.Inheritance;
-import javax.persistence.InheritanceType;
-import javax.persistence.JoinColumn;
-import javax.persistence.ManyToOne;
-import javax.persistence.PostLoad;
-import javax.persistence.PostPersist;
-import javax.persistence.PrePersist;
-import javax.persistence.Table;
-import javax.persistence.Transient;
+import java.util.Map;
 
 import org.lareferencia.core.util.hashing.XXHash64Hashing;
-import org.springframework.data.domain.Persistable;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@Data
+@JsonDeserialize(using = FieldOccurrenceDeserializer.class)
 @NoArgsConstructor
-@javax.persistence.Entity
-@Inheritance(strategy = InheritanceType.SINGLE_TABLE)
-@DiscriminatorColumn(name = "kind")
-@Table(name = "field_occurrence" /*
-									 * , indexes = { @Index(name = "field_occr_by_type_and_container",
-									 * columnList="field_type_id,field_container_id", unique = false) }
-									 */)
-public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
+@Data
+public abstract class FieldOccurrence {
+
+	public static final String FIELDOCCURRENCE_JSON_VALUE_FIELD = "v";
+	public static final String FIELDOCCURRENCE_JSON_LANG_FIELD = "l";
+	public static final String FIELDOCCURRENCE_JSON_PREFERRED_FIELD = "p";
 
 	public static final String NO_LANG = null;
 
-	@Setter(AccessLevel.NONE)
-	@Id
-	// @GeneratedValue(generator = "FieldOccurrenceTypeSequenceGenerator")
-	// @SequenceGenerator(name="FieldOccurrenceTypeSequenceGenerator",sequenceName="field_occr_type_seq",
-	// allocationSize=100)
-	private Long id = null;
-
-	// field type
-	@Setter(AccessLevel.NONE)
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "field_type_id")
-	protected FieldType fieldType;
-
-	/*
-	 * This field is used for include fieldtype in hash and equals without executing
-	 * the join
-	 */
+	@JsonInclude(Include.NON_DEFAULT)
 	@EqualsAndHashCode.Include
 	@Setter(AccessLevel.NONE)
-	@JsonIgnore
-	@Column(name = "field_type_id", insertable = false, updatable = false)
-	private Long fieldTypeId;
+	@JsonProperty(FIELDOCCURRENCE_JSON_LANG_FIELD)
+	protected String lang = NO_LANG;
 
-	@JsonInclude(Include.NON_NULL)
+	@JsonInclude(Include.NON_DEFAULT)
 	@EqualsAndHashCode.Include
-	protected String lang = null;
-
-	@JsonInclude(Include.NON_NULL)
-	@EqualsAndHashCode.Include
+	@Setter(AccessLevel.NONE)
+	@JsonProperty(FIELDOCCURRENCE_JSON_PREFERRED_FIELD)
 	protected Boolean preferred = false;
-
-	@JsonIgnore
-	public String getFieldName() {
-		return fieldType.getName();
-	}
-
-	public FieldOccurrence(FieldType fieldType) {
-		super();
-		this.fieldType = fieldType;
-		this.fieldTypeId = fieldType.getId();
-		this.lang = NO_LANG;
-		this.preferred = false;
-	}
 
 	public abstract Object getContent();
 
-	public abstract FieldOccurrence addValue(String... params) throws EntityRelationException;
-
 	public abstract String getValue(String... params) throws EntityRelationException;
+
+
+	public FieldOccurrence setLang(String lang) {
+		this.lang = lang;
+		return this;
+	}
+
+	public FieldOccurrence setPreferred(Boolean preferred) {
+		this.preferred = preferred;
+		return this;
+	}
 
 	@Override
 	public String toString() {
 		// only add preferred if it is true, this to preserve backward compatibility
-		return fieldTypeId + "::" + lang + "::" + getContent() + (preferred ? ( "::" + preferred ) : "");
+		return (lang!= null ? (lang + "::") : "") + getContent() + (preferred ? ( "::" + preferred ) : "");
 	}
 
 	public Long hashCodeLong() {
 		return XXHash64Hashing.calculateHashLong(this.toString());
-	}
-
-	@PrePersist
-	public void updateId() {
-		if (id == null)
-			id = hashCodeLong();
 	}
 
 	@Override
@@ -138,12 +93,6 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 			return false;
 
 		FieldOccurrence other = (FieldOccurrence) obj;
-
-		if (fieldTypeId == null) {
-			if (other.fieldTypeId != null)
-				return false;
-		} else if (!fieldTypeId.equals(other.fieldTypeId))
-			return false;
 
 		if (preferred == null) {
 			if (other.preferred != null)
@@ -170,7 +119,6 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 	public int hashCode() {
 		final int prime = 31;
 		int result = 1;
-		result = prime * result + ((fieldTypeId == null) ? 0 : fieldTypeId.hashCode());
 		result = prime * result + ((lang == null) ? 0 : lang.hashCode());
 
 		// only add preferred if it is true, this to preserve backward compatibility
@@ -178,6 +126,21 @@ public abstract class FieldOccurrence extends CacheableEntityBase<Long> {
 			result = prime * result + ((preferred == null) ? 0 : preferred.hashCode());
 
 		return result;
+	}
+
+	public static SimpleFieldOccurrence createSimpleFieldOccurrence(String value)  {
+		SimpleFieldOccurrence occr = new SimpleFieldOccurrence(value);
+		return occr;
+	}
+
+	public static ComplexFieldOccurrence createComplexFieldOccurrence() {
+		ComplexFieldOccurrence occr = new ComplexFieldOccurrence();
+		return occr;
+	}
+
+	public static ComplexFieldOccurrence createComplexFieldOccurrence(Map<String,String> value)  {
+		ComplexFieldOccurrence occr = new ComplexFieldOccurrence(value);
+		return occr;
 	}
 
 }

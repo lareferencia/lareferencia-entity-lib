@@ -20,8 +20,7 @@
 
 package org.lareferencia.core.entity.domain;
 
-import javax.persistence.Column;
-import javax.persistence.DiscriminatorValue;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
@@ -29,8 +28,6 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @NoArgsConstructor
-@javax.persistence.Entity
-@DiscriminatorValue("S")
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class SimpleFieldOccurrence extends FieldOccurrence {
 
@@ -38,34 +35,14 @@ public class SimpleFieldOccurrence extends FieldOccurrence {
 	 * Single string value
 	 **/
 	@Setter(AccessLevel.NONE)
-	@Column(name="content", columnDefinition="TEXT")
 	@EqualsAndHashCode.Include
+	@JsonProperty(FIELDOCCURRENCE_JSON_VALUE_FIELD)
 	String content;
 	
-	public SimpleFieldOccurrence(FieldType field) {
-		super(field);
+	public SimpleFieldOccurrence(String value) {
+		this.content = value;
 	}
 
-	 /**
-     * params[0] = value
-     **/
-	public FieldOccurrence addValue(String ... params) throws EntityRelationException {
-		if ( params.length > 2)
-			throw new EntityRelationException("SimpleFieldOccurrence :: addValue with fieldname was called!!: " + params );
-
-		if ( params.length < 1)
-			throw new EntityRelationException("SimpleFieldOccurrence :: addValue with no value was called!!: " + params );
-
-		if ( params.length == 2 && params[1] != null)
-			this.lang = params[1];
-		
-		this.content = params[0];
-		
-		
-		return this;
-	}
-
-	
 	 /**
      * no params
      */
@@ -82,8 +59,4 @@ public class SimpleFieldOccurrence extends FieldOccurrence {
 		return content; 
 	}
 	
-	
-    
-	
-    
 }

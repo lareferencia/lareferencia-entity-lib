@@ -52,8 +52,7 @@ import lombok.Setter;
 
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @MappedSuperclass
-//@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
-public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrenceContainer implements Persistable<UUID>  {
+public abstract class BaseEntity extends FieldOccurrenceContainer implements Persistable<UUID>  {
 	
 	
 	@Setter(AccessLevel.NONE)
@@ -131,17 +130,6 @@ public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrence
 	protected Set<SemanticIdentifier> semanticIdentifiers = new HashSet<SemanticIdentifier>();
 	
 	
-	@RestResource(exported = false)
-	@Getter
-	@OneToMany(mappedBy = "fromEntity", fetch = FetchType.LAZY)
-	private Set<T> fromRelations = new HashSet<T>();
-	
-	@RestResource(exported = false)
-	@Getter
-	@OneToMany(mappedBy = "toEntity", fetch = FetchType.LAZY)
-	private Set<T> toRelations = new HashSet<T>();
-	
-	
 	/**
 	 * List field names of associated entity type
 	 * @return List of field names
@@ -194,7 +182,8 @@ public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrence
 		
 	@Override
 	public String toString() {
-		return "Entity [Id=" + getId() + "]";
+		return "Entity [Id=" + getId() + ", Type=" + entityType.getName() + ", SemanticIdentifiers=" 
+		+ semanticIdentifiers + "]" + this.getFieldOccurrencesAsMap();
 	}
 
 }

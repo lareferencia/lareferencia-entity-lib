@@ -21,7 +21,6 @@
 package org.lareferencia.core.entity.repositories.jpa;
 
 
-import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -83,17 +82,17 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 	// End Entity Paginator methods
 
-	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
-	Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
+	// @Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
+	// Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
 
-	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.id.relationTypeId = ?2")
-	Page<Entity> findRelatedToEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
+	// @Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.id.relationTypeId = ?2")
+	// Page<Entity> findRelatedToEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
 
-	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.name = ?2")
-	Page<Entity> findRelatedFromEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
+	// @Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.name = ?2")
+	// Page<Entity> findRelatedFromEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
-	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.name = ?2")
-	Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
+	// @Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.name = ?2")
+	// Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
 	
 	/*** Hidden in rest **/

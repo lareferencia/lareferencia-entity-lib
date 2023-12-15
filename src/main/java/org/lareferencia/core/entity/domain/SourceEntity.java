@@ -43,12 +43,6 @@ import lombok.Setter;
 @javax.persistence.Entity
 @Table(name = "source_entity", 
 indexes = { @Index(name = "idx_final_entity_id",  columnList="final_entity_id", unique = false) })
-@AssociationOverride( name="occurrences",
-joinTable=@JoinTable(name = "source_entity_fieldoccr", 
-					   joinColumns = @JoinColumn(name = "entity_id"), 
-					   inverseJoinColumns = @JoinColumn(name = "fieldoccr_id"), 
-					   indexes = { @Index(name = "sfo_entity_id",  columnList="entity_id", unique = false),
-						       @Index(name = "sfo_fieldoccr_id",  columnList="fieldoccr_id", unique = false)}))
 @AssociationOverride( name="semanticIdentifiers",
 joinTable=@JoinTable( name = "source_entity_semantic_identifier", 
 		  joinColumns = @JoinColumn(name = "entity_id"), 
@@ -56,7 +50,7 @@ joinTable=@JoinTable( name = "source_entity_semantic_identifier",
 		  indexes = { @Index(name = "ssi_entity_id",  columnList="entity_id", unique = false),
 			       @Index(name = "ssi_semantic_id",  columnList="semantic_id", unique = false)}
 ))
-public class SourceEntity extends BaseEntity<SourceRelation>  {
+public class SourceEntity extends BaseEntity  {
 
 			
 	public SourceEntity() {
@@ -103,11 +97,5 @@ public class SourceEntity extends BaseEntity<SourceRelation>  {
 		this.finalEntity = finalEntity;
 		this.finalEntityId = finalEntity.getId();
 	}
-
-//	@Override
-//	public String toString() {
-//		return entityTypeId + "::" + sourceId + "::" + recordId + "::" + itemId;
-//	}
-//	
 
 }

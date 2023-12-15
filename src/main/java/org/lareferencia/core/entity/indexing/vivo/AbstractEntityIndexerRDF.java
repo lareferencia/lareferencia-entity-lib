@@ -6,6 +6,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -93,18 +94,16 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 			//Map attributes
 			attributesForConcat = new HashMap<String, String>();
 			List<AttributeIndexingConfig> sourceAttributes = entityIndexingConfig.getSourceAttributes();
-			Map<String, Collection<FieldOccurrence>> entityAttrOccurrences = entity.getOccurrencesAsMap();
+			Map<String, Collection<FieldOccurrence>> entityAttrOccurrences = entity.getFieldOccurrencesAsMap();
 			
 			processAttributeList(sourceAttributes, entityAttrOccurrences, entityId, false);
-			
-			//Map relations
-			Multimap<String, Relation> relationsMap = getRelationMultimap(entity);
-			
+				
 			for (RelationIndexingConfig relationConfig : entityIndexingConfig.getSourceRelations()) {
-				for (Relation relation : relationsMap.get(relationConfig.getName())) {
-					String relationId = relation.getId().toString();
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-					String relatedEntityId = relatedEntity.getId().toString();
+
+				for (Relation relation : entity.getRelationsByType(relationConfig.getName())) {
+					
+					String relationId = entityId + "_" + relation.getTarget();
+					String relatedEntityId = relation.getTarget().toString();
 					List<RDFTripleConfig> triplesConfig = relationConfig.getTargetTriples();
 					
 					for (RDFTripleConfig tripleConfig : triplesConfig) {
@@ -113,10 +112,10 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 					
 					//Relation fields
 					List<AttributeIndexingConfig> relSourceAttributes = relationConfig.getSourceAttributes();
-					Map<String, Collection<FieldOccurrence>> relAttrOccurrences = relation.getOccurrencesAsMap();
+					Map<String, Collection<FieldOccurrence>> relAttrOccurrences = relation.getFieldOccurrencesAsMap();
 					
 					processAttributeList(relSourceAttributes, relAttrOccurrences, relationId, true);
-				}
+			}
 			}
 			
 		} catch (EntityRelationException e) {
@@ -185,23 +184,6 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 		} catch (Exception e) {
 			logger.warn("Error loading field occurrence filters: " + e.getMessage());
 		}
-	}
-	
-	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
-		
-		Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
-		
-		for (Relation relation: entity.getFromRelations() ) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());			
-			relationsByName.put(rtype.getName(), relation);
-		}
-		
-		for (Relation relation: entity.getToRelations() ) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());			
-			relationsByName.put(rtype.getName(), relation);
-		}
-				
-		return relationsByName;
 	}
 	
 	private String expandElementUri (String value) {

@@ -24,7 +24,9 @@ package org.lareferencia.core.entity.indexing.service;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 
+import org.apache.jena.shacl.sys.C;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -95,23 +97,16 @@ public abstract class AbstractPlainEntityIndexer implements IEntityIndexer {
 			
 			IEntity ientity = createIEntity(entity.getId().toString(), type.getName());
 			
-			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
-			
 			
 			for (SemanticIdentifier semanticId: entity.getSemanticIdentifiers() )
 				ientity.addSemanticId(semanticId.getIdentifier());
-			
-			
-//			for (Provenance provenance: entity.getProvenances() )
-//				ientity.addProvenanceId(provenance.getProvenanceStr());
-//			
-		
+				
 			for (FieldIndexingConfig fieldConfig: entityIndexingConfig.getIndexFields() ) {	
-				processFieldConfig(entity, relationsMap, fieldConfig, ientity);
+				processFieldConfig(entity, fieldConfig, ientity);
 			}
 			
 			for (FieldIndexingConfig identifierConfig: entityIndexingConfig.getIndexRelatedIds() ) {	
-				processIndentifierConfig(entity, relationsMap, identifierConfig, ientity);
+				processIndentifierConfig(entity, identifierConfig, ientity);
 			}
 			
 			saveIEntity(ientity);
@@ -129,15 +124,16 @@ public abstract class AbstractPlainEntityIndexer implements IEntityIndexer {
 	protected abstract void saveIEntity(IEntity entity);
 	
 	
-	private void processIndentifierConfig(Entity entity, Multimap<String, Relation> relationsMap, FieldIndexingConfig config, IEntity ientity) throws EntityRelationException {
+	private void processIndentifierConfig(Entity entity, FieldIndexingConfig config, IEntity ientity) throws EntityRelationException {
 
 		if ( config.getName() != null && config.getSourceRelation() != null && config.getSourceMember() !=null ) {
-			for (Relation relation :  relationsMap.get(config.getSourceRelation()) ) 
-				ientity.addRelatedIdentifier(config.getName(), relation.getRelatedEntity(entity.getId()).getId().toString() );
+		
+			for (Relation relation :  entity.getRelationsByType(config.getSourceRelation()) ) 
+				ientity.addRelatedIdentifier(config.getName(), relation.getTarget().toString() );
 		}
 	}
 
-	private void processFieldConfig(Entity entity,  Multimap<String, Relation> relationsMap, FieldIndexingConfig config, IEntity ientity) throws EntityIndexingException {
+	private void processFieldConfig(Entity entity, FieldIndexingConfig config, IEntity ientity) throws EntityIndexingException {
 	
 		String sourceFieldName = config.getSourceField();
 		
@@ -148,14 +144,17 @@ public abstract class AbstractPlainEntityIndexer implements IEntityIndexer {
 		
 		if ( config.getSourceRelation() != null ) {// is a relation indexing
 						
-			for (Relation relation : relationsMap.get(config.getSourceRelation()) ) {
+			for (Relation relation : entity.getRelationsByType(config.getSourceRelation()) ) {
 			
 				if ( config.getSourceMember() != null ) { // is a related entity field
 					
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-					
-					// add all occrs of the given source field from all entities of type source member related by source relation 
-					processFieldOccurrence( relatedEntity.getFieldOccurrences(sourceFieldName) , config, ientity);
+					Optional<Entity> relatedEntityOpt = entityDataService.getEntityById(relation.getTarget());
+
+					if ( !relatedEntityOpt.isPresent() )
+						throw new EntityIndexingException("Error Indexing Entity Field " + config.getName() + " related entity " + relation.getTarget() + " not found" );
+					else
+						// add all occrs of the given source field from all entities of type source member related by source relation 
+						processFieldOccurrence(  relatedEntityOpt.get().getFieldOccurrences(sourceFieldName) , config, ientity);
 						
 					
 				} else  {// is a relation attribute 		
@@ -225,24 +224,6 @@ public abstract class AbstractPlainEntityIndexer implements IEntityIndexer {
 		for (String entityId: entityIdList)
 			delete(entityId);
 	}
-	
-	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
-		
-		Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
-		
-		
-		for (Relation relation: entity.getFromRelations() ) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());			
-			relationsByName.put(rtype.getName(), relation);
-		}
-		
-		for (Relation relation: entity.getToRelations() ) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());			
-			relationsByName.put(rtype.getName(), relation);
-		}
-				
-		return relationsByName;
-		
-	}
+
 
 }

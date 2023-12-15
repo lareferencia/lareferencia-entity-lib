@@ -24,12 +24,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.InputStream;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.apache.jena.sparql.function.library.e;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.lareferencia.core.entity.domain.Entity;
@@ -41,8 +43,10 @@ import org.lareferencia.core.entity.domain.FieldType.Kind;
 import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
 import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
+import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.lareferencia.core.entity.services.EntityMetamodelService;
+import org.lareferencia.core.entity.services.SemanticIdentifierCachedStore;
 import org.lareferencia.core.entity.xml.XMLEntityRelationData;
 import org.lareferencia.core.entity.xml.XMLEntityRelationMetamodel;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,6 +75,9 @@ public class EntityRelationUnitTests {
     
     @Autowired 
     private EntityDataService dataService;
+
+	@Autowired
+	private SemanticIdentifierRepository semanticIdentifierRepository;
     
     
     @Test
@@ -84,7 +91,7 @@ public class EntityRelationUnitTests {
     	String entityType1Name = "Person"; 
     	    	
     	//given
-    	EntityType personEntityType = new EntityType("Person");
+    	EntityType personEntityType = new EntityType(entityType1Name);
     	
     	FieldType nameFieldType = new FieldType("name");
      	FieldType pidFieldType = new FieldType("pid");
@@ -123,16 +130,19 @@ public class EntityRelationUnitTests {
     	
     	assertThat( entity ).isNotNull();  	
 
-    	FieldOccurrence occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("john");
+    	FieldOccurrence occrName = FieldOccurrence.createSimpleFieldOccurrence("john");
+        entity.addFieldOccurrence("name", occrName );
     	assertThat( occrName ).isNotNull();  	
 
-    	FieldOccurrence occrPID = entity.getEntityType().getFieldByName("pid").buildFieldOccurrence().addValue("1234");
-    	assertThat( occrPID ).isNotNull(); 		
+    	FieldOccurrence occrPID = FieldOccurrence.createSimpleFieldOccurrence("1234"); 
+        entity.addFieldOccurrence("pid", occrPID );
+        assertThat( occrPID ).isNotNull(); 		
     	
-    	FieldOccurrence occrComplex = entity.getEntityType()
-    			.getFieldByName("complex").buildFieldOccurrence().addValue("subfield1", "s1data")
-    			.addValue("subfield2", "s2data");
-    	
+    	FieldOccurrence occrComplex = FieldOccurrence.createComplexFieldOccurrence()
+                                            .addValue("subfield1", "s1data")
+                                            .addValue("subfield2", "s2data");
+    	entity.addFieldOccurrence("complex", occrComplex);
+
     	assertThat( occrComplex ).isNotNull(); 		
     	 	
     	assertThat( occrName.getValue() ).isEqualTo("john"); 		
@@ -141,9 +151,6 @@ public class EntityRelationUnitTests {
     	assertThat( occrComplex.getValue("subfield1") ).isEqualTo("s1data");
     	assertThat( occrComplex.getValue("subfield2") ).isEqualTo("s2data");
     	
-    	entity.addFieldOccurrence(occrName);
-    	entity.addFieldOccurrence(occrPID);
-    	entity.addFieldOccurrence(occrComplex);
     	  	
     	entityRepository.save(entity);
        	assertThat( entity.getId() ).isNotNull();
@@ -154,7 +161,6 @@ public class EntityRelationUnitTests {
        	 * 
        	 * load_entity_instance_and_test_fieldoccurrence_deduplication
        	 */
-
    	
     	entity = entityRepository.getOne( entityID );
     	
@@ -180,28 +186,30 @@ public class EntityRelationUnitTests {
     	assertThat( occrComplex.getValue("subfield2") ).isEqualTo("s2data");
     	
     	// Adding john again should have no effect (because the value is the same)
-    	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("john");
-    	entity.addFieldOccurrence(occrName);
-    	occrs = entity.getFieldOccurrences("name");
+
+    	occrName = FieldOccurrence.createSimpleFieldOccurrence("john");
+        entity.addFieldOccurrence("name", occrName );
+        
+        occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(1); // still size 1
 
     	// Now we add john as different lang occurrence, so must be treated as different
-    	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("john");
-    	occrName.setLang("en");
-     	entity.addFieldOccurrence(occrName);
+    	occrName = FieldOccurrence.createSimpleFieldOccurrence("john").setLang("es"); 
+        entity.addFieldOccurrence("name", occrName);
+     	
     	occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(2); // must be 2
 
     	// Now we add a completely different value, peter 
-    	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("peter");
-    	entity.addFieldOccurrence(occrName);
+    	occrName = FieldOccurrence.createSimpleFieldOccurrence("peter");
+        entity.addFieldOccurrence("name", occrName); 
     	occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(3); // must be 3
 
     	// Now we add the same value but to a different field 
-    	occrPID = entity.getEntityType().getFieldByName("pid").buildFieldOccurrence().addValue("john");
-    	entity.addFieldOccurrence(occrPID);
-
+    	occrPID = FieldOccurrence.createSimpleFieldOccurrence("");
+        entity.addFieldOccurrence("pid", occrPID);
+        
     	occrs = entity.getFieldOccurrences("name");
     	assertThat(occrs.size()).isEqualTo(3); // must still be 3
     	
@@ -244,8 +252,6 @@ public class EntityRelationUnitTests {
     	XMLEntityRelationMetamodel xmlModel = modelService.loadConfigFromDocument(doc);
     	
     	assertThat(xmlModel).isNotNull();
-    	
-  
     }
     
     @Test
@@ -260,65 +266,69 @@ public class EntityRelationUnitTests {
     }
     
     
-//  @Test
-//  @Transactional
-//  public void test_entity_model_and_data_xml_loading() throws Exception {
-//  
-//  	Document doc = getXmlDocumentFromResourcePath("simple_model.xml");
-//  	XMLEntityRelationMetamodel xmlModel = modelService.loadConfigFromDocument(doc);
-//  	assertThat(xmlModel).isNotNull();
-//  	modelService.persist(xmlModel);
-//  	
-//  	doc = getXmlDocumentFromResourcePath("simple_data_1.xml");
-//  	dataService.parseAndPersistEntityRelationDataFromXMLDocument(doc);
-//  	
-//
-//}
+	@Test
+	@Transactional
+	public void test_entity_model_and_data_xml_loading() throws Exception {
+	
+		Document doc = getXmlDocumentFromResourcePath("simple_model.xml");
+		XMLEntityRelationMetamodel xmlModel = modelService.loadConfigFromDocument(doc);
+		assertThat(xmlModel).isNotNull();
+		modelService.persist(xmlModel);
+		
+		doc = getXmlDocumentFromResourcePath("simple_data_1.xml");
+		dataService.parseAndPersistEntityRelationDataFromXMLDocument(doc, false);
+	}
+
+
 //    @Test
 //    @Transactional
 //    public void test_entity_model_and_data_persist() throws Exception {
-//    
+
+// 	SemanticIdentifierCachedStore semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository, 1000);
+	
+   
 //    	Document doc = getXmlDocumentFromResourcePath("entity-model-test1.xml");
 //    	XMLEntityRelationMetamodel xmlModel = modelService.loadConfigFromDocument(doc);
 //    	assertThat(xmlModel).isNotNull();
 //    	modelService.persist(xmlModel);
-//    	
+   	
 //    	doc = getXmlDocumentFromResourcePath("entity-data-test1.xml");
-//    	dataService.parseAndPersistEntityRelationDataFromXMLDocument(doc);
-//    	
+//    	dataService.parseAndPersistEntityRelationDataFromXMLDocument(doc, false);
+   	
 //    	// find by semanticId
-//    	Entity entity1 = dataService.findEntityBySemanticId("lattes::4687858846001290").get();
+//    	Entity entity1 = semanticIdentifierCachedStore.loadOrCreate("lattes::4687858846001290");
 //    	assertThat(entity1).isNotNull();
-//    	
+   	
 //    	Entity entity2 = dataService.findEntityBySemanticId("orcid::0000-0001-5057-9936").get();
 //    	assertThat(entity1).isNotNull();
-//    
+   
 //    	assertThat(entity1).isEqualTo(entity2);
-//    	
+   	
 //    	List<String> semanticIdentifiers = new ArrayList<String>();
 //    	semanticIdentifiers.add("lattes::4687858846001290");
 //    	semanticIdentifiers.add("orcid::0000-0001-5057-9936");
 //    	semanticIdentifiers.add("dummy:1231231231232");
+
 //    	Set<Entity> entities =  dataService.findEntityBySemanticIds(semanticIdentifiers);
 //    	assertThat(entities.size()).isEqualTo(1);
 //    	assertThat(entities.iterator().next()).isEqualTo(entity1);
-//    	
+   	
 //    	// find by provenace and semanticId
 //    	Entity entity3 = entityRepository.findByProvenaceAndSemanticIdentifier("LATTES::4687858846001290", "orcid::0000-0001-5057-9936").get();
 //    	assertThat(entity3).isEqualTo(entity1);
-//
+
 //    	entities =  entityRepository.findByProvenaceAndAnySemanticIdentifiers("LATTES::4687858846001290", semanticIdentifiers);
 //    	assertThat(entities.size()).isEqualTo(1);
 //    	assertThat(entities.iterator().next()).isEqualTo(entity1);
-//    	
+   	
 //    	entities =  entityRepository.findByProvenaceAndLastUpdateAndAnySemanticIdentifiers("LATTES::4687858846001290", new Date(), semanticIdentifiers);
 //    	assertThat(entities.size()).isEqualTo(1);
 //    	assertThat(entities.iterator().next()).isEqualTo(entity1);
-//    	
-//    	   	
+   	
+   	   	
 //    	System.out.println("The end");
 //    }
-//    
+   
    
     
     
