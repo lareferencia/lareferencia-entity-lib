@@ -40,6 +40,7 @@ import org.lareferencia.core.entity.indexing.vivo.config.RDFTripleConfig.TripleP
 import org.lareferencia.core.entity.indexing.vivo.config.RDFTripleConfig.TripleSubject;
 import org.lareferencia.core.entity.indexing.vivo.config.RelationIndexingConfig;
 import org.lareferencia.core.entity.services.EntityDataService;
+import org.lareferencia.core.util.hashing.XXHash64Hashing;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 
@@ -102,7 +103,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 
 				for (Relation relation : entity.getRelationsByType(relationConfig.getName())) {
 					
-					String relationId = entityId + "_" + relation.getTarget();
+					String relationId = XXHash64Hashing.calculateHashString(  relationConfig.getName() + "_" + entityId + "_" + relation.getTarget() );
 					String relatedEntityId = relation.getTarget().toString();
 					List<RDFTripleConfig> triplesConfig = relationConfig.getTargetTriples();
 					
