@@ -243,8 +243,8 @@ public class EntityDataService {
 		// if is not new and is not update, do nothing
 		if (!isNew && !isUpdate) return stats;
 
-		if (isUpdate) // logically delete existing source entities related with this provenance because they will be replaced
-			sourceEntityRepository.logicalDeleteByProvenanceId(provenance.getId());
+		// if (isUpdate) // logically delete existing source entities related with this provenance because they will be replaced
+		// 	sourceEntityRepository.logicalDeleteByProvenanceId(provenance);
 		
 		// iterate over entities in the XML
 		for (XMLEntityInstance xmlEntity : data.getEntities()) {

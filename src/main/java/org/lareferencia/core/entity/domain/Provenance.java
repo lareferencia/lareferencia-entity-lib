@@ -25,9 +25,9 @@ import java.time.LocalDateTime;
 import javax.persistence.Column;
 import javax.persistence.Convert;
 import javax.persistence.Id;
+import javax.persistence.IdClass;
 
 import org.lareferencia.core.util.LocalDateTimeAttributeConverter;
-import org.lareferencia.core.util.hashing.XXHash64Hashing;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -38,19 +38,22 @@ import lombok.Setter;
 @javax.persistence.Table(name = "provenance")
 @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
 @NoArgsConstructor
+@IdClass(ProvenanceId.class)
 public class Provenance {
 
 	@Id
 	@Getter
-	private Long id;
-	
-	@Getter
-	@Column(name = "source_id")
+	@Column(name = "source")
 	private String source;
 	
+	@Id
 	@Getter
-	@Column(name = "record_id")
+	@Column(name = "record")
 	private String record;
+
+	public ProvenanceId getId() {
+		return new ProvenanceId(this.source, this.record);
+	}
 	
 	@Getter
 	@Setter
@@ -61,15 +64,14 @@ public class Provenance {
 	public Provenance(String source, String record) { 
 		this.source = source;
 		this.record = record;
-		this.id = hashCodeLong();
 	}
+
+
+
 	
 	@Override
 	public String toString() {
 		return this.source + "::" + this.record;	
 	}
 
-	public Long hashCodeLong() {
-		return XXHash64Hashing.calculateHashLong( toString() );
-	}
 }

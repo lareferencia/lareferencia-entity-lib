@@ -27,6 +27,7 @@ import javax.persistence.Column;
 import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.JoinColumn;
+import javax.persistence.JoinColumns;
 import javax.persistence.JoinTable;
 import javax.persistence.ManyToOne;
 import javax.persistence.Table;
@@ -59,8 +60,9 @@ public class SourceEntity extends BaseEntity  {
 
 	public SourceEntity(EntityType type, Provenance provenance) {
 		super(type);
+		this.source = provenance.getSource();
+		this.record = provenance.getRecord();
 		this.provenance = provenance;
-		this.provenanceId = provenance.getId();
 	}
 
 	@Getter
@@ -79,16 +81,24 @@ public class SourceEntity extends BaseEntity  {
 	@Column(name = "deleted")
 	private Boolean deleted = false;
 	
+	@JsonIgnore
 	@Getter
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "provenance_id")
-	protected Provenance provenance;
+	@Column(name = "source", insertable = false, updatable = false)
+	protected String source;
 
 	@JsonIgnore
 	@Getter
-	@Column(name = "provenance_id", insertable = false, updatable = false)
-	protected Long provenanceId;
-	
+	@Column(name = "record", insertable = false, updatable = false)
+	protected String record;
+
+	@Getter
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumns( {
+		@JoinColumn(name="source", referencedColumnName="source"),
+		@JoinColumn(name="record", referencedColumnName="record")
+	} )
+	protected Provenance provenance;
+
 	public Long hashCodeLong() {
 		return XXHash64Hashing.calculateHashLong( this.toString() );
 	}

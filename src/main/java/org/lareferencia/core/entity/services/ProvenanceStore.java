@@ -22,8 +22,7 @@
 package org.lareferencia.core.entity.services;
 
 import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.lareferencia.core.entity.domain.ProvenanceId;
 import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
 
 import java.time.LocalDateTime;
@@ -41,7 +40,7 @@ public class ProvenanceStore  {
 
         Provenance createdProvenance = new Provenance(source,record);
 
-        Optional<Provenance> optProvenance = repository.findById( createdProvenance.getId() );
+        Optional<Provenance> optProvenance = repository.findById( new ProvenanceId(source, record) );
 
         if ( optProvenance.isPresent() )
             return optProvenance.get();
@@ -53,7 +52,10 @@ public class ProvenanceStore  {
 
 
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {
-        repository.setLastUpdate(provenance.getId(), lastUpdate);
+
+        provenance.setLastUpdate(lastUpdate);
+        repository.saveAndFlush(provenance);
+
     }
 
 

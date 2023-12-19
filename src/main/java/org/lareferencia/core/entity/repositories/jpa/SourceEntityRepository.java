@@ -24,7 +24,6 @@ package org.lareferencia.core.entity.repositories.jpa;
 import java.util.Set;
 import java.util.UUID;
 
-import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.SourceEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -37,10 +36,10 @@ import org.springframework.data.rest.core.annotation.RestResource;
 @RepositoryRestResource(exported = false)
 public interface SourceEntityRepository extends JpaRepository<SourceEntity, UUID> {
 
-	@RestResource(exported = false)
-	@Modifying
-	@Query("update SourceEntity e set e.deleted = true where e.provenanceId = ?1")
-	void logicalDeleteByProvenanceId(Long provenanceId);
+	// @RestResource(exported = false)
+	// @Modifying
+	// @Query("update SourceEntity e set e.deleted = true where e.provenanceId = ?1")
+	// void logicalDeleteByProvenanceId(Long provenanceId);
 
 	/**
 	 * Update sourceEntity and other sourceEntities sharing any semantic identifiers to point to the same final Entity
@@ -57,7 +56,7 @@ public interface SourceEntityRepository extends JpaRepository<SourceEntity, UUID
 
 	
 	
-	Set<SourceEntity> findByProvenanceId(Long id);	
+	Set<SourceEntity> findBySourceAndRecord(String source, String record);	
 	
 	@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier s, source_entity_semantic_identifier e" + 
 				 "WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id AND e.entity_id != ?1 AND se.uuid = e.entity_id;", nativeQuery=true)
