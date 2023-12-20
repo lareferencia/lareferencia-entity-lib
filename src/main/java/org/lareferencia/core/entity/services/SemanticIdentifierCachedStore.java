@@ -21,30 +21,40 @@
 
 package org.lareferencia.core.entity.services;
 
+import org.lareferencia.core.entity.domain.Loaded;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
 
-public class SemanticIdentifierCachedStore extends ConcurrentCachedStore<Long, SemanticIdentifier, SemanticIdentifierRepository> {
+public class SemanticIdentifierCachedStore extends ConcurrentCachedStore<String, SemanticIdentifier, SemanticIdentifierRepository> {
 
     public SemanticIdentifierCachedStore(SemanticIdentifierRepository repository, Integer capacity) {
         super(repository, capacity, false, 0);
     }
 
-    public synchronized SemanticIdentifier loadOrCreate(String semantiIdentifier) {
+    public synchronized Loaded<SemanticIdentifier> loadOrCreate(String semantiIdentifier, Boolean readOnly) {
 
-        SemanticIdentifier createdSemanticIdentifier = new SemanticIdentifier(semantiIdentifier);
+        SemanticIdentifier existingSemanticIdentifier = this.get( semantiIdentifier );
 
-        SemanticIdentifier existingSemanticIdentifier = this.get( createdSemanticIdentifier.getId() );
         if ( existingSemanticIdentifier == null ) {
-            this.put(createdSemanticIdentifier.getId(), createdSemanticIdentifier);
-            return createdSemanticIdentifier;
+
+            SemanticIdentifier createdSemanticIdentifier = new SemanticIdentifier(semantiIdentifier);
+
+            // if readOnly is true, we don't persist the new semantic identifier by calling putWithoutPersist
+            if (readOnly)
+                this.putWithoutPersist(semantiIdentifier, createdSemanticIdentifier);
+            else
+                this.put(semantiIdentifier, createdSemanticIdentifier);
+            
+            return new Loaded<SemanticIdentifier>(createdSemanticIdentifier, true);
         }
-        else
-            return existingSemanticIdentifier;
+        else {
+            return new Loaded<SemanticIdentifier>(existingSemanticIdentifier, false);
+        }
+    }
+
+    public synchronized Loaded<SemanticIdentifier> loadOrCreate(String semantiIdentifier) {
+        return loadOrCreate(semantiIdentifier, false);
     }
 
 

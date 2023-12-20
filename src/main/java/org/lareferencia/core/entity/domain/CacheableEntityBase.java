@@ -33,11 +33,10 @@ import lombok.Setter;
 
 public abstract class CacheableEntityBase<T> implements ICacheableEntity<T> {
 
+
 	public CacheableEntityBase() {
 		_isNew = true;
 	}
-
-//////////////////////////Begin of persistable //////////////////////////////////////
 
 	/**
 	 * This is part of Persistable interface, and allows to Hibernate not to look

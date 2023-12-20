@@ -26,7 +26,6 @@ import org.lareferencia.core.entity.domain.ICacheableEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -62,8 +61,11 @@ public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends Jpa
     public C get(K key) {
         return cache.get(key, k -> {
             Optional<C> optObj = repository.findById(key);
-            if (optObj.isPresent())
-                return (C) Hibernate.unproxy(optObj.get());
+            if (optObj.isPresent()) {
+                C obj = (C) Hibernate.unproxy(optObj.get());
+                obj.markAsStored();
+                return obj;
+            }
             else
                 return null;
         });
@@ -79,6 +81,14 @@ public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends Jpa
                 obj.markAsStored();
             }
 
+            cache.put(key, obj);
+        }
+
+    }
+
+    public synchronized void putWithoutPersist(K key, C obj) {
+
+        if ( cache.getIfPresent(key) == null ) {
             cache.put(key, obj);
         }
 

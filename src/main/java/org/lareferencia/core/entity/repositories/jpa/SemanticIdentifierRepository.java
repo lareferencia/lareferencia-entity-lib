@@ -27,7 +27,7 @@ import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
 
 @RepositoryRestResource(path = "semantic_identifier", collectionResourceRel = "semantic_identifier")
-public interface SemanticIdentifierRepository extends JpaRepository<SemanticIdentifier, Long> {
+public interface SemanticIdentifierRepository extends JpaRepository<SemanticIdentifier, String> {
 
 	
 	

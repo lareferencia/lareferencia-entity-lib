@@ -21,9 +21,12 @@
 package org.lareferencia.core.entity.repositories.jpa;
 
 
+import java.util.Collection;
 import java.util.Set;
 import java.util.UUID;
 
+import org.lareferencia.core.entity.domain.EntityType;
+import org.lareferencia.core.entity.domain.Provenance;
 import org.lareferencia.core.entity.domain.SourceEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
@@ -41,41 +44,52 @@ public interface SourceEntityRepository extends JpaRepository<SourceEntity, UUID
 	// @Query("update SourceEntity e set e.deleted = true where e.provenanceId = ?1")
 	// void logicalDeleteByProvenanceId(Long provenanceId);
 
-	/**
-	 * Update sourceEntity and other sourceEntities sharing any semantic identifiers to point to the same final Entity
-	 * @param sourceEntity
-	 * @param finalEntity
-	 */
-	@RestResource(exported = false)
-	@Modifying
-	@Query(value="UPDATE source_entity " + 
-			"SET final_entity_id = ?2 WHERE uuid IN " + 
-			"(SELECT e.entity_id FROM source_entity_semantic_identifier s, source_entity_semantic_identifier e " + 
-			" WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id )", nativeQuery=true)
-	void updateFinalEntityReference(UUID sourceEntity, UUID finalEntity);
+	// /**
+	//  * Update sourceEntity and other sourceEntities sharing any semantic identifiers to point to the same final Entity
+	//  * @param sourceEntity
+	//  * @param finalEntity
+	//  */
+	// @RestResource(exported = false)
+	// @Modifying
+	// @Query(value="UPDATE source_entity " + 
+	// 		"SET final_entity_id = ?2 WHERE uuid IN " + 
+	// 		"(SELECT e.entity_id FROM source_entity_semantic_identifier s, source_entity_semantic_identifier e " + 
+	// 		" WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id )", nativeQuery=true)
+	// void updateFinalEntityReference(UUID sourceEntity, UUID finalEntity);
 
 	
 	
-	Set<SourceEntity> findBySourceAndRecord(String source, String record);	
+	// Set<SourceEntity> findBySourceAndRecord(String source, String record);	
 	
-	@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier s, source_entity_semantic_identifier e" + 
-				 "WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id AND e.entity_id != ?1 AND se.uuid = e.entity_id;", nativeQuery=true)
-	Set<SourceEntity> findSourceEntitiesWithSharedSemanticIdentifiers(UUID sourceEntityId);
+	// @Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier s, source_entity_semantic_identifier e" + 
+	// 			 "WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id AND e.entity_id != ?1 AND se.uuid = e.entity_id;", nativeQuery=true)
+	// Set<SourceEntity> findSourceEntitiesWithSharedSemanticIdentifiers(UUID sourceEntityId);
 
 		
-	/**
-	 * copy semantic identifiers from source entity to final entity ( only if not alreay are there )
-	 * @param sourceEntity
-	 * @param finalEntity
-	 */
-	@RestResource(exported = false)
-	@Modifying
-	@Query(value="	INSERT INTO entity_semantic_identifier\n" + 
-			"	SELECT ?2, sesi.semantic_id\n" + 
-			"	FROM source_entity_semantic_identifier sesi\n" + 
-			"	WHERE sesi.entity_id = ?1 AND sesi.semantic_id NOT IN \n" + 
-			"	(SELECT esi.semantic_id FROM entity_semantic_identifier esi WHERE esi.entity_id = ?2)\n", nativeQuery=true)
-	void copySemanticIdentifiersFromSourceEntityToEntity(UUID sourceEntity, UUID finalEntity);
+	// /**
+	//  * copy semantic identifiers from source entity to final entity ( only if not alreay are there )
+	//  * @param sourceEntity
+	//  * @param finalEntity
+	//  */
+	// @RestResource(exported = false)
+	// @Modifying
+	// @Query(value="	INSERT INTO entity_semantic_identifier\n" + 
+	// 		"	SELECT ?2, sesi.semantic_id\n" + 
+	// 		"	FROM source_entity_semantic_identifier sesi\n" + 
+	// 		"	WHERE sesi.entity_id = ?1 AND sesi.semantic_id NOT IN \n" + 
+	// 		"	(SELECT esi.semantic_id FROM entity_semantic_identifier esi WHERE esi.entity_id = ?2)\n", nativeQuery=true)
+	// void copySemanticIdentifiersFromSourceEntityToEntity(UUID sourceEntity, UUID finalEntity);
+
+
+	@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier si " +
+			" WHERE se.entity_type_id = ?1 AND se.source = ?2 AND se.record = ?3 AND se.uuid = si.entity_id AND si.semantic_id IN (?4) limit 1", nativeQuery=true)
+    SourceEntity findOneByEntityTypeAndProvenanceAndSemanticIdentifiers(Long entityTypeId, String source, String record, Collection<String> existingSemanticIds);
+
+		@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier si " +
+			" WHERE se.uuid = si.entity_id AND si.semantic_id IN (?1) limit 1", nativeQuery=true)
+    SourceEntity findOneBySemanticIdentifiers(Collection<String> existingSemanticIds);
+
+	
 
 	
 	

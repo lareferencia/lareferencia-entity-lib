@@ -39,7 +39,6 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
 import lombok.Getter;
-import lombok.Setter;
 
 @javax.persistence.Entity
 @Table(name = "source_entity", 
@@ -75,11 +74,6 @@ public class SourceEntity extends BaseEntity  {
 	@Getter
 	@Column(name = "final_entity_id", insertable = false, updatable = false)
 	protected UUID finalEntityId;
-	
-	@Setter
-	@Getter
-	@Column(name = "deleted")
-	private Boolean deleted = false;
 	
 	@JsonIgnore
 	@Getter

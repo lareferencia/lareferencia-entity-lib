@@ -21,6 +21,7 @@
 
 package org.lareferencia.core.entity.services;
 
+import org.lareferencia.core.entity.domain.Loaded;
 import org.lareferencia.core.entity.domain.Provenance;
 import org.lareferencia.core.entity.domain.ProvenanceId;
 import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
@@ -36,20 +37,24 @@ public class ProvenanceStore  {
         this.repository = repository;
     }
 
-    public synchronized Provenance loadOrCreate(String source, String record)  {
-
-        Provenance createdProvenance = new Provenance(source,record);
-
+    public synchronized Loaded<Provenance> loadOrCreate(String source, String record, Boolean readOnly)  {
+        
         Optional<Provenance> optProvenance = repository.findById( new ProvenanceId(source, record) );
 
         if ( optProvenance.isPresent() )
-            return optProvenance.get();
+            return new Loaded<Provenance>(optProvenance.get(), false);
         else {
-            repository.saveAndFlush(createdProvenance);
-            return createdProvenance;
+            Provenance createdProvenance = new Provenance(source,record);
+            if (!readOnly)
+                repository.saveAndFlush(createdProvenance);
+            return new Loaded<Provenance>(createdProvenance, true);
         }
     }
 
+    public synchronized Loaded<Provenance> loadOrCreate(String source, String record)  {
+        return loadOrCreate(source, record, false);
+    }
+    
 
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {
 
