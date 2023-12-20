@@ -319,38 +319,8 @@ public class EntityDataService {
 
 			stats.incrementSourceEntitiesLoaded(); // increment stats
 
-	
-			
-	
-		// 	profiler.messure("Find or Create Final Entity");		
-		// 	// find existing entity o create a new one
-		// 	FindOrCreateEntityResult findOrCreateFinalEntityResult = findOrCreateFinalEntity(sourceEntity);
-
-		// 	// if the entity is new, increment entities stats, if not, increment duplications found stats
-		// 	if (!findOrCreateFinalEntityResult.entityAlreadyExists)
-		// 		stats.incrementEntitiesCreated(); // increment entities stats because the entity is new
-		// 	else	
-		// 		stats.incrementEntitiesDuplicated(); // increment duplications found stats because the entity already exists
-		
-		// 	// set that entity as final entity for this source entity
-		// 	sourceEntity.setFinalEntity(findOrCreateFinalEntityResult.entity);
-
-		// 	// save the source entity
-		// 	profiler.messure("Persist Source Entity");
-		// 	if (!dryRun) // if not dry run, save source entity
-		// 		sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
-
-		// 	stats.incrementSourceEntitiesLoaded(); // increment stats
-
-		// 	// copy semantic ids from source to entity
-		// 	// sourceEntityRepository.copySemanticIdentifiersFromSourceEntityToEntity(sourceEntity.getId(),
-		// 	// entity.getId());
-
-		// 	profiler.messure("Save source entity");
-
-		// 	// add the source entity to the map for later use in relations
-		// 	entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
-		// }
+			entitiesByRef.put(xmlEntity.getRef(), sourceEntity);
+		}
 
 		// for each relation
 		// for (XMLRelationInstance xmlRelation : data.getRelations()) {
@@ -373,7 +343,7 @@ public class EntityDataService {
 
 		// 	profiler.messure("SourceRelation Persistence :: " + xmlRelation.getType());
 
-		 }
+		// }
 
 		// finally update provenance lastUpdate
 		// if (!dryRun) // if not dry run, update provenance last update
@@ -394,9 +364,15 @@ public class EntityDataService {
 
 	private Loaded<SourceEntity> loadOrCreateSourceEntity(EntityType entityType, Provenance provenance, Set<String> existingSemanticIds) {
 	
-		SourceEntity sourceEntity = sourceEntityRepository.findOneByEntityTypeAndProvenanceAndSemanticIdentifiers(entityType.getId(), 
-			provenance.getSource(), provenance.getRecord(), existingSemanticIds);		
+		SourceEntity sourceEntity = null; 
+		
+		// if there is at least one semantic identifier, try to find the source entity by semantic identifiers
+		if (existingSemanticIds.size() > 0) {
+			sourceEntity = sourceEntityRepository.findOneByEntityTypeAndProvenanceAndSemanticIdentifiers(entityType.getId(), 
+				provenance.getSource(), provenance.getRecord(), existingSemanticIds);		
+		}
 
+		// if source entity not found, create a new one
 		if (sourceEntity == null) {
 			sourceEntity = new SourceEntity(entityType, provenance);
 			return new Loaded<SourceEntity>(sourceEntity, true);
@@ -408,8 +384,14 @@ public class EntityDataService {
 
 	public Loaded<Entity> loadOrCreateFinalEntity(EntityType entityType, Set<String> existingSemanticIds) {
 
-		Entity entity = entityRepository.findOneByEntityTypeIdAndSemanticIdentifiers(entityType.getId(), existingSemanticIds);
-
+		Entity entity = null; 
+		
+		// if there is at least one semantic identifier, try to find the source entity by semantic identifiers
+		if (existingSemanticIds.size() > 0) {
+			entity = entityRepository.findOneByEntityTypeIdAndSemanticIdentifiers(entityType.getId(), existingSemanticIds);		
+		}
+		
+		// if not found, create a new one
 		if (entity == null) { // No entities with shared semantic identifiers exists the create
 			entity = new Entity(entityType);
 			return new Loaded<Entity>(entity, true);
