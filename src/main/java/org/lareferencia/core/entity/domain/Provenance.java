@@ -39,7 +39,7 @@ import lombok.Setter;
 @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
 @NoArgsConstructor
 @IdClass(ProvenanceId.class)
-public class Provenance {
+public class Provenance extends CacheableEntityBase<ProvenanceId>  {
 
 	@Id
 	@Getter
@@ -65,9 +65,6 @@ public class Provenance {
 		this.source = source;
 		this.record = record;
 	}
-
-
-
 	
 	@Override
 	public String toString() {

@@ -77,7 +77,7 @@ public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends Jpa
         if ( cache.getIfPresent(key) == null ) {
 
             if ( !readOnly) {
-                repository.saveAndFlush(obj);
+                repository.save(obj);
                 obj.markAsStored();
             }
 

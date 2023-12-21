@@ -32,9 +32,11 @@ import javax.persistence.Index;
 import javax.persistence.JoinColumn;
 import javax.persistence.JoinTable;
 import javax.persistence.OneToMany;
+import javax.persistence.PostLoad;
+import javax.persistence.PrePersist;
 import javax.persistence.Table;
+import javax.persistence.Transient;
 
-import org.apache.jena.sparql.function.library.e;
 import org.springframework.data.rest.core.annotation.RestResource;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -55,6 +57,8 @@ joinTable=@JoinTable( name = "entity_semantic_identifier",
 			       @Index(name = "esi_semantic_id",  columnList="semantic_id", unique = false)}
 ))
 public class Entity extends BaseEntity  {
+
+	private static final MultiMapRelationAttributeConverter converter = new MultiMapRelationAttributeConverter();
 
 	public static final String NAME = "entity";
 	
@@ -77,13 +81,27 @@ public class Entity extends BaseEntity  {
 	@JsonIgnore
 	@Column(name = "dirty")
 	private Boolean dirty = true;
-
-	@Column(name="relations", columnDefinition="TEXT")
-	@Convert(converter = MultiMapRelationAttributeConverter.class)
+	
+	//@Convert(converter = MultiMapRelationAttributeConverter.class)
 	@Setter(AccessLevel.NONE)
-	//@Getter(AccessLevel.NONE)
+	@Transient
 	protected Multimap<String, Relation> relationsByName = LinkedHashMultimap.create();
 
+	@Column(name="relations", columnDefinition="TEXT")
+	protected String serializedRelations = "{}";
+
+	@PostLoad
+	protected void postLoad() {
+		super.postLoad();
+		this.relationsByName = converter.convertToEntityAttribute(this.serializedRelations);
+	}
+
+	@PrePersist
+	protected void prePersist() {
+		super.prePersist();
+		this.serializedRelations = converter.convertToDatabaseColumn(this.relationsByName);
+	}
+	
 	/**
 	 * Returns occurrences by fieldname
 	 * @return

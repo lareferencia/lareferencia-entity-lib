@@ -76,7 +76,7 @@ public class EntityJSONTests {
  
         MultiMapFieldOcurrenceAttributeConverter converter = new MultiMapFieldOcurrenceAttributeConverter();
 
-        String json = converter.convertToDatabaseColumn(entity.getOccurrencessByFieldName());
+        String json = converter.convertToDatabaseColumn(entity.getOccurrencesByFieldName());
         System.out.println(json);
 
         Multimap<String, FieldOccurrence> mymap = converter.convertToEntityAttribute(json);

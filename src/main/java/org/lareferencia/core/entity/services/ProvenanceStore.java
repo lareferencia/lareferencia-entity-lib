@@ -37,29 +37,33 @@ public class ProvenanceStore  {
         this.repository = repository;
     }
 
-    public synchronized Loaded<Provenance> loadOrCreate(String source, String record, Boolean readOnly)  {
+    public synchronized Loaded<Provenance> loadOrCreate(String source, String record, Boolean persist)  {
         
         Optional<Provenance> optProvenance = repository.findById( new ProvenanceId(source, record) );
 
-        if ( optProvenance.isPresent() )
+        if ( optProvenance.isPresent() ) {
+            optProvenance.get().markAsStored();
             return new Loaded<Provenance>(optProvenance.get(), false);
+        }
         else {
             Provenance createdProvenance = new Provenance(source,record);
-            if (!readOnly)
-                repository.saveAndFlush(createdProvenance);
+            if (persist) {
+                repository.save(createdProvenance);
+                createdProvenance.markAsStored();
+            }
             return new Loaded<Provenance>(createdProvenance, true);
         }
     }
 
     public synchronized Loaded<Provenance> loadOrCreate(String source, String record)  {
-        return loadOrCreate(source, record, false);
+        return loadOrCreate(source, record, true);
     }
     
 
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {
 
         provenance.setLastUpdate(lastUpdate);
-        repository.saveAndFlush(provenance);
+        repository.save(provenance);
 
     }
 

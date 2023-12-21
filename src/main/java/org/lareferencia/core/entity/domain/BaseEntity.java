@@ -124,7 +124,7 @@ public abstract class BaseEntity extends FieldOccurrenceContainer implements Per
 	@Column(name = "entity_type_id", insertable = false, updatable = false)
 	protected Long entityTypeId;
 			
-	@ManyToMany(cascade = {CascadeType.DETACH}, fetch = FetchType.LAZY)
+	@ManyToMany(fetch = FetchType.LAZY)
 	protected Set<SemanticIdentifier> semanticIdentifiers = new HashSet<SemanticIdentifier>();
 	
 	
@@ -145,22 +145,14 @@ public abstract class BaseEntity extends FieldOccurrenceContainer implements Per
 		return entityType.getName();
 	}
 	
-	
 	public void addSemanticIdentifier(SemanticIdentifier semanticIdentifier) {
-		
-		/** Check if this identifiers was not linked to this entity before */
-		if ( ! semanticIdentifiers.contains( semanticIdentifier ) ){
-			this.semanticIdentifiers.add( semanticIdentifier );
-//			markAsDirty(); // the entity was actually updated
-		}
+		semanticIdentifiers.add(semanticIdentifier);		
 	}
 	
 	public void addSemanticIdentifiers(Collection<SemanticIdentifier> semanticIdentifiers) {
-		
 		for ( SemanticIdentifier semId : semanticIdentifiers )
 			this.addSemanticIdentifier(semId);
 	}
-	
 	
 	public void removeAllSemanticIdentifiers() {
 		this.semanticIdentifiers.clear();

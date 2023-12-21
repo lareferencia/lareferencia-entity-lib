@@ -21,7 +21,6 @@
 package org.lareferencia.core.entity.domain;
 
 import java.util.Collection;
-import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.Map;
 
@@ -44,15 +43,28 @@ import lombok.Setter;
 @MappedSuperclass
 public abstract class FieldOccurrenceContainer  {
 
-	public static final String FIELDOCCURRENCE_JSON_OCURRENCES_FIELD = "f";
+	private static final MultiMapFieldOcurrenceAttributeConverter converter = new MultiMapFieldOcurrenceAttributeConverter();
 
-	@Column(name="fieldvalues", columnDefinition="TEXT")
-	@Convert(converter = MultiMapFieldOcurrenceAttributeConverter.class)
+	public static final String FIELDOCCURRENCE_JSON_OCURRENCES_FIELD = "f";
+	
+	//@Convert(converter = MultiMapFieldOcurrenceAttributeConverter.class)
 	@Setter(AccessLevel.NONE)
 	@JsonIgnore
-	//@Getter(AccessLevel.NONE)
-	protected Multimap<String, FieldOccurrence> occurrencessByFieldName = LinkedHashMultimap.create();
+	@Transient
+	protected Multimap<String, FieldOccurrence> occurrencesByFieldName = LinkedHashMultimap.create();
 
+	@Column(name="fieldvalues", columnDefinition="TEXT")
+	protected String serializedFieldOccurrences = "{}";
+
+	@PostLoad
+	protected void postLoad() {
+		this.occurrencesByFieldName = converter.convertToEntityAttribute(this.serializedFieldOccurrences);
+	}
+
+	@PrePersist
+	protected void prePersist() {
+		this.serializedFieldOccurrences = converter.convertToDatabaseColumn(this.occurrencesByFieldName);
+	}
 
 	/**
 	 * Returns occurrences by fieldname
@@ -61,7 +73,7 @@ public abstract class FieldOccurrenceContainer  {
 	@JsonIgnore
 	public Collection<FieldOccurrence> getFieldOccurrences(String fieldName) {
 
-		Collection<FieldOccurrence> occurrences = this.occurrencessByFieldName.get(fieldName);
+		Collection<FieldOccurrence> occurrences = this.occurrencesByFieldName.get(fieldName);
 		if (occurrences == null) 
 			return new LinkedHashSet<FieldOccurrence>();
 		else
@@ -76,15 +88,15 @@ public abstract class FieldOccurrenceContainer  {
 	@JsonProperty(FIELDOCCURRENCE_JSON_OCURRENCES_FIELD)
 	@JsonInclude(Include.NON_EMPTY)
 	public Map<String, Collection<FieldOccurrence>> getFieldOccurrencesAsMap() {
-		return occurrencessByFieldName.asMap();
+		return occurrencesByFieldName.asMap();
 	}
 
 	public void addFieldOccurrence(String fieldName, FieldOccurrence occurrence) {
-		this.occurrencessByFieldName.put(fieldName, occurrence);
+		this.occurrencesByFieldName.put(fieldName, occurrence);
 	}
 	
 	public void removeAllFieldOccurrences() {
-		this.occurrencessByFieldName.clear();
+		this.occurrencesByFieldName.clear();
 	}
 
 	public String toString() {
