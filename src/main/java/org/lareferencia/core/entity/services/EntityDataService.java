@@ -30,7 +30,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -38,7 +37,6 @@ import javax.xml.bind.JAXBContext;
 import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 
-import lombok.AllArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.ComplexFieldOccurrence;
@@ -95,9 +93,6 @@ public class EntityDataService {
 
 	@Autowired
 	private DateHelper dateHelper;
-
-	// @Autowired
-	// private FieldOccurrenceRepository fieldOccurrenceRepository;
 
 	@Autowired
 	private ProvenanceRepository provenanceRepository;
