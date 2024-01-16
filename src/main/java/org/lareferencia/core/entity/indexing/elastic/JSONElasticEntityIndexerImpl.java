@@ -37,7 +37,6 @@ import org.apache.http.impl.nio.client.HttpAsyncClientBuilder;
 import org.apache.http.ssl.SSLContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityType;
@@ -77,6 +76,12 @@ import org.springframework.context.ApplicationContext;
 import javax.net.ssl.SSLContext;
 
 public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
+
+	public static String ELASTIC_PARAM_PREFIX = "elastic-param-";
+	private static String MAPPING_PROPERTIES_STR = "properties";
+	private static String ID_FIELD = "id";
+	private static String ID_FIELD_TYPE = "keyword";
+
 
 	private static Logger logger = LogManager.getLogger(JSONElasticEntityIndexerImpl.class);
 
@@ -407,32 +412,64 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		return fieldMapping;
 	}
 
+	private void addElasticParamsToMapping(Map<String, Object> fieldMapping, Map<String, String> params) {
+
+		// search in the custom params for elastic_param_ keys
+		params.forEach( (key, value) -> {
+			// if key begins with "elastic_param_" add the param to the mapping, removing the prefix
+			if ( key.startsWith(ELASTIC_PARAM_PREFIX) ) {
+				fieldMapping.put(key.replace(ELASTIC_PARAM_PREFIX, ""), value);
+			}	
+		});
+		
+	}
+
 	private void createOrUpdateIndexMapping( EntityIndexingConfig entityIndexingConfig ) throws EntityIndexingException {
 
 		// create mapping based on entity indexing config
 		HashMap<String, Object> typesMapping = new HashMap<String, Object>();
 		HashMap<String, Object> mapping = new HashMap<String, Object>();
-		mapping.put("properties", typesMapping);
+		mapping.put(MAPPING_PROPERTIES_STR, typesMapping);
 
 		// add fields to mapping
-		for ( FieldIndexingConfig fieldConfig : entityIndexingConfig.getIndexFields() )
-			typesMapping.put(fieldConfig.getName(), createTypeMapping(fieldConfig.getType()));
+		for ( FieldIndexingConfig fieldConfig : entityIndexingConfig.getIndexFields() ) {
+			
+			// create field mapping
+			Map<String, Object> fieldMapping =  createTypeMapping( fieldConfig.getType() );
+
+			// add elastic params to mapping
+			addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
+
+			// add field mapping to type mapping
+			typesMapping.put(fieldConfig.getName(), fieldMapping);
+
+		}
+		
 		// add id field to mapping
-		typesMapping.put("id", createTypeMapping("keyword"));
+		typesMapping.put(ID_FIELD, createTypeMapping(ID_FIELD_TYPE));
 
 		// add nested entities to mapping
 		entityIndexingConfig.getIndexNestedEntities().forEach( nestedEntityConfig -> {
 			HashMap<String, Object> nestedTypesMapping = new HashMap<String, Object>();
 			HashMap<String, Object> nestedMapping = new HashMap<String, Object>();
-			nestedMapping.put("properties", nestedTypesMapping);
+			nestedMapping.put(MAPPING_PROPERTIES_STR , nestedTypesMapping);
 			typesMapping.put(nestedEntityConfig.getName(), nestedMapping);
 
 			// add fields to mapping
-			for ( FieldIndexingConfig fieldConfig : nestedEntityConfig.getIndexFields() )
-				nestedTypesMapping.put(fieldConfig.getName(), createTypeMapping(fieldConfig.getType()));
+			for ( FieldIndexingConfig fieldConfig : nestedEntityConfig.getIndexFields() ) {
+
+				// create field mapping
+				Map<String, Object> fieldMapping =  createTypeMapping( fieldConfig.getType() );
+
+				// add elastic params to mapping
+				addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
+
+				// add field mapping to type mapping
+				nestedTypesMapping.put(fieldConfig.getName(), fieldMapping);
+			}	
 
 			// add id field to mapping
-			nestedTypesMapping.put("id", createTypeMapping("keyword"));
+			nestedTypesMapping.put(ID_FIELD , createTypeMapping(ID_FIELD_TYPE));
 		});
 
 		// check if index exists
