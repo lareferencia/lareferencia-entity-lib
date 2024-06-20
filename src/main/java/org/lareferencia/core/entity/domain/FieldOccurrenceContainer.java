@@ -62,6 +62,7 @@ public abstract class FieldOccurrenceContainer  {
 	}
 
 	@PrePersist
+	@PreUpdate
 	protected void prePersist() {
 		this.serializedFieldOccurrences = converter.convertToDatabaseColumn(this.occurrencesByFieldName);
 	}

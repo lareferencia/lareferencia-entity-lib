@@ -34,6 +34,7 @@ import javax.persistence.JoinTable;
 import javax.persistence.OneToMany;
 import javax.persistence.PostLoad;
 import javax.persistence.PrePersist;
+import javax.persistence.PreUpdate;
 import javax.persistence.Table;
 import javax.persistence.Transient;
 
@@ -97,6 +98,7 @@ public class Entity extends BaseEntity  {
 	}
 
 	@PrePersist
+	@PreUpdate
 	protected void prePersist() {
 		super.prePersist();
 		this.serializedRelations = converter.convertToDatabaseColumn(this.relationsByName);
