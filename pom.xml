@@ -22,7 +22,7 @@
 	<artifactId>lareferencia-entity-lib</artifactId>
 	<name>LA Referencia entity lib</name>
 	<description>LA Referencia entity-relation library</description>
-	<version>4.2.3</version>
+	<version>4.2.4</version>
 
 	<properties>
 		<elastic.version>7.17.5</elastic.version>
@@ -32,7 +32,7 @@
 	<parent>
 		<groupId>org.lareferencia</groupId>
 		<artifactId>lareferencia-parent</artifactId>
-		<version>4.2.3</version>
+		<version>4.2.4</version>
 	</parent>
 
 	<dependencies>
@@ -40,7 +40,7 @@
 		<dependency>
 			<groupId>org.lareferencia</groupId>
 			<artifactId>lareferencia-core-lib</artifactId>
-			<version>4.2.3</version>
+			<version>4.2.4</version>
 		</dependency>
 
 
