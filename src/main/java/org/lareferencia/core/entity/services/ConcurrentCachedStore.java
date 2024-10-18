@@ -21,73 +21,107 @@
 
 package org.lareferencia.core.entity.services;
 
-import org.hibernate.Hibernate;
+// import org.hibernate.Hibernate;
+// import org.lareferencia.core.entity.domain.ICacheableEntity;
+// import org.springframework.data.jpa.repository.JpaRepository;
+// import com.github.benmanes.caffeine.cache.Cache;
+// import com.github.benmanes.caffeine.cache.Caffeine;
+// import com.github.benmanes.caffeine.cache.RemovalCause;
+// import org.springframework.transaction.annotation.Propagation;
+// import org.springframework.transaction.annotation.Transactional;
+
+// import java.util.Optional;
+// import java.util.concurrent.TimeUnit;
+
+// public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends JpaRepository<C, K>> {
+
+//     private final Boolean readOnly;
+//     protected final R repository;
+//     private final Cache<K,C> cache;
+
+//     public ConcurrentCachedStore(R repository,  Integer capacity, Boolean readOnly, Integer expireAfterWriteInMinutes) {
+
+//        this.repository = repository;
+//        this.readOnly = readOnly;
+
+//        Caffeine builder = Caffeine.newBuilder();
+
+//        builder.maximumSize(capacity);
+
+//        if ( expireAfterWriteInMinutes > 0 )
+//            builder.expireAfterWrite(expireAfterWriteInMinutes, TimeUnit.MINUTES);
+
+//        /*if ( !readOnly )
+//            builder.removalListener( (Object key, Object obj, RemovalCause cause) -> { if ( obj.) } );
+//        */
+//        cache = builder.build();
+
+
+//     }
+
+//     public C get(K key) {
+//         return cache.get(key, k -> {
+//             Optional<C> optObj = repository.findById(key);
+//             if (optObj.isPresent())
+//                 return (C) Hibernate.unproxy(optObj.get());
+//             else
+//                 return null;
+//         });
+//     }
+
+//     @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW)
+//     public synchronized void put(K key, C obj) {
+
+//         if ( cache.getIfPresent(key) == null ) {
+
+//             if ( !readOnly) {
+//                 repository.saveAndFlush(obj);
+//                 obj.markAsStored();
+//             }
+
+//             cache.put(key, obj);
+//         }
+
+//     }
+
+
+//     public void flush() {
+//         cache.invalidateAll();
+//     }
+
+
+// }
+
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+
 import org.lareferencia.core.entity.domain.ICacheableEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
-import com.github.benmanes.caffeine.cache.Cache;
-import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Optional;
-import java.util.concurrent.TimeUnit;
 
 public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends JpaRepository<C, K>> {
 
-    private final Boolean readOnly;
+    private final ConcurrentMap<K, C> cache;
     protected final R repository;
-    private final Cache<K,C> cache;
+
 
     public ConcurrentCachedStore(R repository,  Integer capacity, Boolean readOnly, Integer expireAfterWriteInMinutes) {
-
-       this.repository = repository;
-       this.readOnly = readOnly;
-
-       Caffeine builder = Caffeine.newBuilder();
-
-       builder.maximumSize(capacity);
-
-       if ( expireAfterWriteInMinutes > 0 )
-           builder.expireAfterWrite(expireAfterWriteInMinutes, TimeUnit.MINUTES);
-
-       /*if ( !readOnly )
-           builder.removalListener( (Object key, Object obj, RemovalCause cause) -> { if ( obj.) } );
-       */
-       cache = builder.build();
-
-
+        this.cache = new ConcurrentHashMap<>();
+        this.repository = repository;
     }
 
     public C get(K key) {
-        return cache.get(key, k -> {
-            Optional<C> optObj = repository.findById(key);
-            if (optObj.isPresent())
-                return (C) Hibernate.unproxy(optObj.get());
-            else
-                return null;
-        });
+        return cache.get(key);
     }
 
-    @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW)
-    public synchronized void put(K key, C obj) {
-
-        if ( cache.getIfPresent(key) == null ) {
-
-            if ( !readOnly) {
-                repository.saveAndFlush(obj);
-                obj.markAsStored();
-            }
-
-            cache.put(key, obj);
-        }
-
+    public void put(K key, C value) {
+        cache.put(key, value);
     }
 
-
+    public void remove(K key) {
+        cache.remove(key);
+    }
     public void flush() {
-        cache.invalidateAll();
+        cache.clear();
     }
-
-
+        
 }

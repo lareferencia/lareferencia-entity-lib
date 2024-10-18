@@ -26,44 +26,60 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
+import org.apache.solr.client.solrj.response.UpdateResponse;
 import org.lareferencia.core.entity.indexing.service.AbstractPlainEntityIndexer;
 import org.lareferencia.core.entity.indexing.service.IEntity;
-import org.lareferencia.core.entity.repositories.solr.EntitySolrRepository;
-import org.springframework.beans.factory.annotation.Autowired;
 
-public class EntityIndexerSolrImpl extends AbstractPlainEntityIndexer  {
-	
-	private static Logger logger = LogManager.getLogger(EntityIndexerSolrImpl.class);	
-	
-	List<EntitySolr> entityBuffer = new LinkedList<EntitySolr>(); 
+public class EntityIndexerSolrImpl extends AbstractPlainEntityIndexer {
 
-	@Autowired
-	EntitySolrRepository entitySolrRepository;
+    private static Logger logger = LogManager.getLogger(EntityIndexerSolrImpl.class);
 
-	@Override
-	protected IEntity createIEntity(String id, String type) {
-		return new EntitySolr(id,type);
-	}
+    private static final String SOLR_URL = "http://localhost:8983/solr/entity";
+    private SolrClient solrClient;
 
-	@Override
-	public void delete(String id) {
-		logger.debug("Deleting entity: " + id );
-		this.entitySolrRepository.deleteById(id);
-	}
-	
+    List<EntitySolr> entityBuffer = new LinkedList<EntitySolr>();
 
-	@Override
-	protected void saveIEntity(IEntity ientity) {
-		entityBuffer.add( (EntitySolr) ientity  );
-	}
-	
-	@Override
-	public void flush() {
-		entitySolrRepository.saveAll( entityBuffer);
-		entityBuffer = new LinkedList<EntitySolr>(); 
-	}
+    public EntityIndexerSolrImpl() {
+        this.solrClient = new HttpSolrClient.Builder(SOLR_URL).build();
+    }
 
+    @Override
+    protected IEntity createIEntity(String id, String type) {
+        return new EntitySolr(id, type);
+    }
 
-	
+    @Override
+    public void delete(String id) {
+        logger.debug("Deleting entity: " + id);
+        try {
+            UpdateResponse response = solrClient.deleteById(id);
+            solrClient.commit();
+            logger.debug("Delete response: " + response);
+        } catch (Exception e) {
+            logger.error("Error deleting entity: " + id + " :: " + e.getMessage());
+        }
+    }
 
+    @Override
+    protected void saveIEntity(IEntity ientity) {
+        entityBuffer.add((EntitySolr) ientity);
+    }
+
+    @Override
+    public void flush() {
+        try {
+            List<UpdateResponse> responses = new LinkedList<>();
+            for (EntitySolr entity : entityBuffer) {
+                UpdateResponse response = solrClient.add(entity.toSolrInputDocument());
+                responses.add(response);
+            }
+            solrClient.commit();
+            logger.debug("Flush responses: " + responses);
+            entityBuffer = new LinkedList<EntitySolr>();
+        } catch (Exception e) {
+            logger.error("Error flushing entities: " + e.getMessage());
+        }
+    }
 }

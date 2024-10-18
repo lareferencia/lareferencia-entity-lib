@@ -118,7 +118,7 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	
 	/////////////////////////////////// Entity and Relation building from SourceEntity And Relation Entity
 	
-	@Query(value = "CALL merge_entity_relation_data(0);", nativeQuery = true)
+	@Query(value = "SELECT merge_entity_relation_data(0);", nativeQuery = true)
 	int mergeEntiyRelationData();
    
 

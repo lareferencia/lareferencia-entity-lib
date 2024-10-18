@@ -20,70 +20,83 @@
 
 package org.lareferencia.core.entity.search.solr;
 
+import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.solr.client.solrj.SolrClient;
+import org.apache.solr.client.solrj.SolrQuery;
+import org.apache.solr.client.solrj.impl.HttpSolrClient;
+import org.apache.solr.client.solrj.response.QueryResponse;
+import org.apache.solr.common.SolrDocumentList;
 import org.lareferencia.core.entity.indexing.service.IEntity;
 import org.lareferencia.core.entity.indexing.solr.EntitySolr;
-import org.lareferencia.core.entity.repositories.solr.EntitySolrRepository;
 import org.lareferencia.core.entity.search.service.IEntitySearchService;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.solr.core.SolrTemplate;
-import org.springframework.data.solr.core.query.Criteria;
-import org.springframework.data.solr.core.query.SimpleQuery;
-import org.springframework.data.solr.core.query.result.ScoredPage;
 import org.springframework.stereotype.Service;
 
 @Service
 public class EntitySearchServiceSolrImpl implements IEntitySearchService {
 
-    @Autowired
-    private EntitySolrRepository repository;
+    private static final Logger logger = LogManager.getLogger(EntitySearchServiceSolrImpl.class);
+    private static final String SOLR_URL = "http://localhost:8983/solr/entity";
+    private SolrClient solrClient;
 
-    @Autowired
-    private SolrTemplate solrTemplate;
+    public EntitySearchServiceSolrImpl() {
+        this.solrClient = new HttpSolrClient.Builder(SOLR_URL).build();
+    }
 
     @Override
     public Page<? extends IEntity> listEntitiesByType(String entityTypeName, Pageable pageable) {
+        SolrQuery query = new SolrQuery();
+        query.setQuery(EntitySolr.TYPE_FIELD_NAME + ":" + entityTypeName);
+        query.setStart((int) pageable.getOffset());
+        query.setRows(pageable.getPageSize());
 
-        return repository.findEntitiesByEntityType(entityTypeName, pageable);
-
+        try {
+            QueryResponse response = solrClient.query(query);
+            SolrDocumentList documents = response.getResults();
+            List<EntitySolr> entities = new ArrayList<>();
+            documents.forEach(doc -> entities.add(EntitySolr.fromSolrDocument(doc)));
+            return new PageImpl<>(entities, pageable, documents.getNumFound());
+        } catch (Exception e) {
+            logger.error("Error listing entities by type: " + entityTypeName + " :: " + e.getMessage());
+            return Page.empty();
+        }
     }
 
     @Override
     public Page<? extends IEntity> searchEntitiesByTypeAndFields(String entityTypeName, List<String> fieldExpressions, Pageable pageable) {
+        SolrQuery query = new SolrQuery();
+        query.setQuery(EntitySolr.TYPE_FIELD_NAME + ":" + entityTypeName);
+        query.setStart((int) pageable.getOffset());
+        query.setRows(pageable.getPageSize());
 
-       Criteria conditions = new Criteria(EntitySolr.TYPE_FIELD_NAME).is(entityTypeName);
+        StringBuilder queryBuilder = new StringBuilder();
+        queryBuilder.append(EntitySolr.TYPE_FIELD_NAME).append(":").append(entityTypeName);
 
-        conditions = addSearchConditions(conditions, EntitySolr.DYNAMIC_FIELD_PREFIX, fieldExpressions);
-
-        SimpleQuery search = new SimpleQuery(conditions);
-        search.setPageRequest(pageable);
-
-        ScoredPage<EntitySolr> resultsPage = solrTemplate.queryForPage(EntitySolr.COLLECTION, search, EntitySolr.class);
-
-        return resultsPage;
-    }
-
-  
-
-    private Criteria addSearchConditions(Criteria conditions, String fieldPrefix, List<String> expressions) {
-
-        if (expressions != null) {
-            for (String expresion : expressions) {
-
-                String[] parsed = expresion.split(":");
-                String fieldName = fieldPrefix + parsed[0];
-                Criteria criteria = new Criteria(fieldName).contains(parsed[1]);
-
-                conditions = conditions.and(criteria);
-
+        if (fieldExpressions != null) {
+            for (String expression : fieldExpressions) {
+                String[] parsed = expression.split(":");
+                String fieldName = EntitySolr.DYNAMIC_FIELD_PREFIX + parsed[0];
+                queryBuilder.append(" AND ").append(fieldName).append(":").append(parsed[1]);
             }
         }
 
-        return conditions;
+        query.setQuery(queryBuilder.toString());
+
+        try {
+            QueryResponse response = solrClient.query(query);
+            SolrDocumentList documents = response.getResults();
+            List<EntitySolr> entities = new ArrayList<>();
+            documents.forEach(doc -> entities.add(EntitySolr.fromSolrDocument(doc)));
+            return new PageImpl<>(entities, pageable, documents.getNumFound());
+        } catch (Exception e) {
+            logger.error("Error searching entities by type and fields: " + entityTypeName + " :: " + e.getMessage());
+            return Page.empty();
+        }
     }
-
-
 }

@@ -29,17 +29,15 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import javax.persistence.Id;
 
+import org.apache.solr.common.SolrDocument;
+import org.apache.solr.common.SolrInputDocument;
 import org.lareferencia.core.entity.indexing.service.EntityFieldValue;
 import org.lareferencia.core.entity.indexing.service.IEntity;
 import org.lareferencia.core.entity.indexing.service.EntityFieldValue.LangFieldType;
-import org.springframework.data.annotation.AccessType;
-import org.springframework.data.annotation.AccessType.Type;
-import org.springframework.data.solr.core.mapping.Dynamic;
-import org.springframework.data.solr.core.mapping.Indexed;
-import org.springframework.data.solr.core.mapping.SolrDocument;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -48,7 +46,6 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@SolrDocument(collection = EntitySolr.COLLECTION)
 public class EntitySolr implements IEntity {
 
     public static final String COLLECTION = "entity";
@@ -77,84 +74,99 @@ public class EntitySolr implements IEntity {
     public static final String TYPE_FIELD_NAME = "type";
 
     public EntitySolr(String id, String type) {
-
         super();
-
         this.id = id;
         this.type = type;
-
     }
 
     @Id
-    @Indexed(name = "id", type = "string")
     protected String id;
 
-    @Indexed(name = "semantic_id", type = "string")
-    protected List<String> semanticIds = new ArrayList<String>();
+    protected List<String> semanticIds = new ArrayList<>();
 
-    @Indexed(name = "provenance_id", type = "string")
-    protected List<String> provenanceIds = new ArrayList<String>();
+    protected List<String> provenanceIds = new ArrayList<>();
 
-    @Indexed(name = TYPE_FIELD_NAME, type = "string")
     protected String type;
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_DATE_PREFIX + "*", type = "date")
-    protected Map<String, List<String>> datesByFieldName = new HashMap<String, List<String>>();
+    protected Map<String, List<String>> datesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> datesRangeByFieldName = new HashMap<>();
+    protected Map<String, List<String>> valuesByFieldName = new HashMap<>();
+    protected Map<String, List<EntityFieldValue>> entityValuesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> porValuesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> engValuesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> spaValuesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> fraValuesByFieldName = new HashMap<>();
+    protected Map<String, List<String>> undValuesByFieldName = new HashMap<>();
+    protected Map<String, String> sortValueByFieldName = new HashMap<>();
+    protected Map<String, List<String>> identifiersByRelation = new HashMap<>();
+    protected Map<String, String> linksByRelation = new HashMap<>();
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_DATERANGE_PREFIX + "*", type = "date")
-    protected Map<String, List<String>> datesRangeByFieldName = new HashMap<String, List<String>>();
+    public SolrInputDocument toSolrInputDocument() {
+        SolrInputDocument doc = new SolrInputDocument();
+        doc.addField(ID_FIELD, id);
+        doc.addField(TYPE_FIELD_NAME, type);
+        doc.addField("semantic_id", semanticIds);
+        doc.addField("provenance_id", provenanceIds);
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> valuesByFieldName = new HashMap<String, List<String>>();
+        datesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_DATE_PREFIX + key, value));
+        datesRangeByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_DATERANGE_PREFIX + key, value));
+        valuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_FIELD_PREFIX + key, value));
+        porValuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_POR_FIELD_PREFIX + key, value));
+        engValuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_ENG_FIELD_PREFIX + key, value));
+        spaValuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_SPA_FIELD_PREFIX + key, value));
+        fraValuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_FRA_FIELD_PREFIX + key, value));
+        undValuesByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_UND_FIELD_PREFIX + key, value));
+        sortValueByFieldName.forEach((key, value) -> doc.addField(DYNAMIC_SORT_FIELD_PREFIX + key, value));
+        identifiersByRelation.forEach((key, value) -> doc.addField(DYNAMIC_RELID_PREFIX + key, value));
+        linksByRelation.forEach((key, value) -> doc.addField(DYNAMIC_LINK_PREFIX + key, value));
 
-    /**
-     * Entity field value map
-     */
-    protected Map<String, List<EntityFieldValue>> entityValuesByFieldName = new HashMap<String, List<EntityFieldValue>>();
+        return doc;
+    }
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_POR_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> porValuesByFieldName = new HashMap<String, List<String>>();
+    public static EntitySolr fromSolrDocument(SolrDocument doc) {
+        EntitySolr entity = new EntitySolr();
+        entity.setId(doc.getFieldValue(ID_FIELD) != null ? doc.getFieldValue(ID_FIELD).toString() : null);
+        entity.setType(doc.getFieldValue(TYPE_FIELD_NAME) != null ? doc.getFieldValue(TYPE_FIELD_NAME).toString() : null);
+        entity.setSemanticIds(doc.getFieldValues("semantic_id").stream().map(Object::toString).collect(Collectors.toList()));
+        entity.setProvenanceIds(doc.getFieldValues("provenance_id").stream().map(Object::toString).collect(Collectors.toList()));
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_ENG_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> engValuesByFieldName = new HashMap<String, List<String>>();
+        doc.getFieldNames().forEach(fieldName -> {
+            if (fieldName.startsWith(DYNAMIC_DATE_PREFIX)) {
+                entity.datesByFieldName.put(fieldName.substring(DYNAMIC_DATE_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_DATERANGE_PREFIX)) {
+                entity.datesRangeByFieldName.put(fieldName.substring(DYNAMIC_DATERANGE_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_FIELD_PREFIX)) {
+                entity.valuesByFieldName.put(fieldName.substring(DYNAMIC_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_POR_FIELD_PREFIX)) {
+                entity.porValuesByFieldName.put(fieldName.substring(DYNAMIC_POR_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_ENG_FIELD_PREFIX)) {
+                entity.engValuesByFieldName.put(fieldName.substring(DYNAMIC_ENG_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_SPA_FIELD_PREFIX)) {
+                entity.spaValuesByFieldName.put(fieldName.substring(DYNAMIC_SPA_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_FRA_FIELD_PREFIX)) {
+                entity.fraValuesByFieldName.put(fieldName.substring(DYNAMIC_FRA_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_UND_FIELD_PREFIX)) {
+                entity.undValuesByFieldName.put(fieldName.substring(DYNAMIC_UND_FIELD_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_SORT_FIELD_PREFIX)) {
+                entity.sortValueByFieldName.put(fieldName.substring(DYNAMIC_SORT_FIELD_PREFIX.length()), (String) doc.getFieldValue(fieldName));
+            } else if (fieldName.startsWith(DYNAMIC_RELID_PREFIX)) {
+                entity.identifiersByRelation.put(fieldName.substring(DYNAMIC_RELID_PREFIX.length()), doc.getFieldValues(fieldName).stream().map(Object::toString).collect(Collectors.toList()));
+            } else if (fieldName.startsWith(DYNAMIC_LINK_PREFIX)) {
+                entity.linksByRelation.put(fieldName.substring(DYNAMIC_LINK_PREFIX.length()), (String) doc.getFieldValue(fieldName));
+            }
+        });
 
-    @Dynamic
-    @Indexed(name = DYNAMIC_SPA_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> spaValuesByFieldName = new HashMap<String, List<String>>();
-
-    @Dynamic
-    @Indexed(name = DYNAMIC_FRA_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> fraValuesByFieldName = new HashMap<String, List<String>>();
-
-    @Dynamic
-    @Indexed(name = DYNAMIC_UND_FIELD_PREFIX + "*", type = "string")
-    protected @AccessType(Type.PROPERTY) Map<String, List<String>> undValuesByFieldName = new HashMap<String, List<String>>();
-
-    @Dynamic
-    @Indexed(name = DYNAMIC_SORT_FIELD_PREFIX + "*", type = "string")
-    protected Map<String, String> sortValueByFieldName = new HashMap<String, String>();
-
-    @Dynamic
-    @Indexed(name = DYNAMIC_RELID_PREFIX + "*", type = "string")
-    protected Map<String, List<String>> identifiersByRelation = new HashMap<String, List<String>>();
-
-    @Dynamic
-    @Indexed(name = DYNAMIC_LINK_PREFIX + "*", type = "string")
-    protected Map<String, String> linksByRelation = new HashMap<String, String>();
+        return entity;
+    }
 
     public void setValuesByFieldName(Map<String, List<String>> values) {
         valuesByFieldName = values;
     }
 
     public Map<String, List<String>> getValuesByFieldName() {
-        Map<String, List<String>> values = new HashMap<String, List<String>>();
+        Map<String, List<String>> values = new HashMap<>();
         entityValuesByFieldName.forEach((fieldName, listEntityValues) -> {
-            List<String> list = new LinkedList<String>();
+            List<String> list = new LinkedList<>();
             for (EntityFieldValue entityValue : listEntityValues) {
                 list.add(entityValue.getValue());
             }
@@ -211,7 +223,6 @@ public class EntitySolr implements IEntity {
     @Override
     public List<EntityFieldValue> getOccurrencesByFieldName(String fieldName) {
         return entityValuesByFieldName.getOrDefault(fieldName, new ArrayList<EntityFieldValue>());
-
     }
 
     @Override
@@ -221,38 +232,30 @@ public class EntitySolr implements IEntity {
 
     @Override
     public IEntity addFieldOccurrences(String fieldName, List<EntityFieldValue> list) {
-
         for (EntityFieldValue e : list) {
-            // TODO: to be optimized
             addFieldOccurrence(fieldName, e);
         }
-
         return this;
     }
 
     @Override
     public IEntity addFieldOccurrence(String fieldName, EntityFieldValue value) {
-
         if (!entityValuesByFieldName.containsKey(fieldName)) {
-            entityValuesByFieldName.put(fieldName,new LinkedList<EntityFieldValue>());
+            entityValuesByFieldName.put(fieldName, new LinkedList<EntityFieldValue>());
         }
         entityValuesByFieldName.get(fieldName).add(value);
-
         return this;
     }
 
     @Override
     public IEntity addDateFieldOccurrence(String fieldName, EntityFieldValue value, DateTimeFormatter formatter) {
-        List<EntityFieldValue> list = new LinkedList<EntityFieldValue>();
-
+        List<EntityFieldValue> list = new LinkedList<>();
         list.add(value);
-
         return addDateFieldOccurrences(fieldName, list, formatter);
     }
 
     @Override
     public IEntity addDateFieldOccurrence(String fieldName, LocalDateTime value) {
-        // Default zoneOffset (probably should be configured)
         ZoneOffset zoneOffSet = ZoneOffset.UTC;
         List<EntityFieldValue> list = new LinkedList<>();
         list.add(new EntityFieldValue.Builder()
@@ -261,24 +264,16 @@ public class EntitySolr implements IEntity {
     }
 
     @Override
-    public IEntity addDateFieldOccurrences(String fieldName, List<EntityFieldValue> values,
-            DateTimeFormatter formatter) {
-        // Default zoneOffset (probably should be configured)
+    public IEntity addDateFieldOccurrences(String fieldName, List<EntityFieldValue> values, DateTimeFormatter formatter) {
         ZoneOffset zoneOffSet = ZoneOffset.UTC;
-
-        // By default the formatter is ISO_ZONED_DATE_TIME -
-        // '2011-12-03T10:15:30+01:00[Europe/Paris]'
         if (formatter == null) {
             formatter = DateTimeFormatter.ISO_ZONED_DATE_TIME;
         }
-
-        List<String> newList = new LinkedList<String>();
+        List<String> newList = new LinkedList<>();
         for (EntityFieldValue dateFieldValue : values) {
-
             LocalDateTime parsedDate = LocalDateTime.parse(dateFieldValue.getValue(), formatter);
             newList.add(DateTimeFormatter.ISO_INSTANT.format(parsedDate.toInstant(zoneOffSet)));
         }
-
         if (datesByFieldName.containsKey(fieldName)) {
             datesByFieldName.get(fieldName).addAll(newList);
             datesRangeByFieldName.get(fieldName).addAll(newList);
@@ -292,10 +287,9 @@ public class EntitySolr implements IEntity {
     @Override
     public IEntity addSortingFieldOccurrence(String fieldName, EntityFieldValue value) {
         String oldValue = sortValueByFieldName.get(fieldName);
-
-        if (oldValue == null) // only if not value was added
+        if (oldValue == null) {
             sortValueByFieldName.put(fieldName, value.getValue());
-
+        }
         return null;
     }
 
@@ -324,11 +318,11 @@ public class EntitySolr implements IEntity {
 
     @Override
     public IEntity addRelatedIdentifiers(String relationName, List<String> list) {
-        if (!identifiersByRelation.containsKey(relationName))
+        if (!identifiersByRelation.containsKey(relationName)) {
             identifiersByRelation.put(relationName, list);
-        else
+        } else {
             identifiersByRelation.get(relationName).addAll(list);
-
+        }
         return this;
     }
 
@@ -389,9 +383,9 @@ public class EntitySolr implements IEntity {
     }
 
     private Map<String, List<String>> getEntityValuesByLang(LangFieldType lang) {
-        Map<String, List<String>> values = new HashMap<String, List<String>>();
+        Map<String, List<String>> values = new HashMap<>();
         entityValuesByFieldName.forEach((fieldName, listEntityValues) -> {
-            List<String> list = new LinkedList<String>();
+            List<String> list = new LinkedList<>();
             for (EntityFieldValue entityValue : listEntityValues) {
                 if (lang == entityValue.getLanguage()) {
                     list.add(entityValue.getValue());
@@ -404,7 +398,6 @@ public class EntitySolr implements IEntity {
 
     private void setEntityValuesWithLang(Map<String, List<String>> values, LangFieldType lang) {
         for (Map.Entry<String, List<String>> entries : values.entrySet()) {
-
             for (String value : entries.getValue()) {
                 EntityFieldValue entityValue = new EntityFieldValue.Builder().fromValueLang(value, lang).build();
                 addFieldOccurrence(entries.getKey(), entityValue);
