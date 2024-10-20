@@ -20,8 +20,8 @@
 
 package org.lareferencia.core.entity.domain;
 
-import javax.persistence.Column;
-import javax.persistence.Id;
+import jakarta.persistence.Column;
+import jakarta.persistence.Id;
 
 import org.lareferencia.core.util.hashing.XXHash64Hashing;
 
@@ -29,8 +29,8 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-@javax.persistence.Entity
-@javax.persistence.Table(name = "semantic_identifier")
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "semantic_identifier")
 @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
 @NoArgsConstructor
 public class SemanticIdentifier extends CacheableEntityBase<Long>  {

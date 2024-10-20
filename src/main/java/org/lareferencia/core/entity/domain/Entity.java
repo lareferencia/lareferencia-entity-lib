@@ -23,14 +23,14 @@ package org.lareferencia.core.entity.domain;
 import java.util.HashSet;
 import java.util.Set;
 
-import javax.persistence.AssociationOverride;
-import javax.persistence.Column;
-import javax.persistence.FetchType;
-import javax.persistence.Index;
-import javax.persistence.JoinColumn;
-import javax.persistence.JoinTable;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
 
 import org.springframework.data.rest.core.annotation.RestResource;
 
@@ -40,7 +40,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Table(name = "entity")
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @AssociationOverride( name="occurrences",
 joinTable=@JoinTable(name = "entity_fieldoccr", 
 					   joinColumns = @JoinColumn(name = "entity_id"), 

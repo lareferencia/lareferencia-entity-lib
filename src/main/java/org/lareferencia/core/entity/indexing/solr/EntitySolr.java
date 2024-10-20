@@ -31,7 +31,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import javax.persistence.Id;
 
 import org.apache.solr.common.SolrDocument;
 import org.apache.solr.common.SolrInputDocument;
@@ -79,7 +78,6 @@ public class EntitySolr implements IEntity {
         this.type = type;
     }
 
-    @Id
     protected String id;
 
     protected List<String> semanticIds = new ArrayList<>();

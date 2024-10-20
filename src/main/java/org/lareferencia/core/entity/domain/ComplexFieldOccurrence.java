@@ -23,9 +23,9 @@ package org.lareferencia.core.entity.domain;
 import java.util.Hashtable;
 import java.util.Map;
 
-import javax.persistence.Column;
-import javax.persistence.Convert;
-import javax.persistence.DiscriminatorValue;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.DiscriminatorValue;
 
 import org.lareferencia.core.util.MapAttributeConverter;
 
@@ -38,7 +38,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @NoArgsConstructor
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @DiscriminatorValue("C")
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class ComplexFieldOccurrence extends FieldOccurrence {

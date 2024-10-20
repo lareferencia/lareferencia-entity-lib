@@ -22,9 +22,9 @@ package org.lareferencia.core.entity.domain;
 
 import java.time.LocalDateTime;
 
-import javax.persistence.Column;
-import javax.persistence.Convert;
-import javax.persistence.Id;
+import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
+import jakarta.persistence.Id;
 
 import org.lareferencia.core.util.LocalDateTimeAttributeConverter;
 import org.lareferencia.core.util.hashing.XXHash64Hashing;
@@ -34,8 +34,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
-@javax.persistence.Entity
-@javax.persistence.Table(name = "provenance")
+@jakarta.persistence.Entity
+@jakarta.persistence.Table(name = "provenance")
 @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
 @NoArgsConstructor
 public class Provenance {
