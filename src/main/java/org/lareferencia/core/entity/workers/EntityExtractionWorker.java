@@ -213,8 +213,8 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 //			entityCache.syncAndClose();
 //		}
 		
-		logInfo(runningContext.toString() + " Updating Entities ...");
-		erService.mergeEntityRelationData();
+		// logInfo(runningContext.toString() + " Updating Entities ...");
+		// erService.mergeEntityRelationData();
 		
 		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: FINISHED");
 		
