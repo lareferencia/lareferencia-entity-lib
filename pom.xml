@@ -66,6 +66,12 @@
 			<artifactId>solr-solrj</artifactId>
 			<version>9.4.1</version> <!-- Usa la versión más reciente o la que sea compatible con tu servidor Solr -->
 		</dependency>
+
+		<dependency>
+			<groupId>com.github.ben-manes.caffeine</groupId>
+			<artifactId>caffeine</artifactId>
+			<version>3.1.8</version>
+		</dependency>
     
 
 		<dependency>

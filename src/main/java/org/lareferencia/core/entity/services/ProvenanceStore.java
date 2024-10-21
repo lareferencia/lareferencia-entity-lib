@@ -21,9 +21,9 @@
 
 package org.lareferencia.core.entity.services;
 
+import org.lareferencia.core.entity.domain.Loaded;
 import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.lareferencia.core.entity.domain.ProvenanceId;
 import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
 
 import java.time.LocalDateTime;
@@ -37,23 +37,34 @@ public class ProvenanceStore  {
         this.repository = repository;
     }
 
-    public synchronized Provenance loadOrCreate(String source, String record)  {
+    public synchronized Loaded<Provenance> loadOrCreate(String source, String record, Boolean persist)  {
+        
+        Optional<Provenance> optProvenance = repository.findById( new ProvenanceId(source, record) );
 
-        Provenance createdProvenance = new Provenance(source,record);
-
-        Optional<Provenance> optProvenance = repository.findById( createdProvenance.getId() );
-
-        if ( optProvenance.isPresent() )
-            return optProvenance.get();
+        if ( optProvenance.isPresent() ) {
+            optProvenance.get().markAsStored();
+            return new Loaded<Provenance>(optProvenance.get(), false);
+        }
         else {
-            repository.saveAndFlush(createdProvenance);
-            return createdProvenance;
+            Provenance createdProvenance = new Provenance(source,record);
+            if (persist) {
+                repository.save(createdProvenance);
+                createdProvenance.markAsStored();
+            }
+            return new Loaded<Provenance>(createdProvenance, true);
         }
     }
 
+    public synchronized Loaded<Provenance> loadOrCreate(String source, String record)  {
+        return loadOrCreate(source, record, true);
+    }
+    
 
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {
-        repository.setLastUpdate(provenance.getId(), lastUpdate);
+
+        provenance.setLastUpdate(lastUpdate);
+        repository.save(provenance);
+
     }
 
 

@@ -21,131 +21,87 @@
 package org.lareferencia.core.entity.domain;
 
 import java.util.Collection;
-import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.Set;
 
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.ManyToMany;
-import jakarta.persistence.MappedSuperclass;
-import jakarta.persistence.Transient;
+import jakarta.persistence.*;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.google.common.collect.ArrayListMultimap;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
+import com.google.common.collect.LinkedHashMultimap;
 import com.google.common.collect.Multimap;
 
 import lombok.AccessLevel;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import lombok.Setter;
-
-
-//@Cacheable
-//@org.hibernate.annotations.Cache(usage = CacheConcurrencyStrategy.READ_ONLY)
 
 @Data
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @MappedSuperclass
 public abstract class FieldOccurrenceContainer  {
 
+	private static final MultiMapFieldOcurrenceAttributeConverter converter = new MultiMapFieldOcurrenceAttributeConverter();
+
+	public static final String FIELDOCCURRENCE_JSON_OCURRENCES_FIELD = "f";
 	
-//	/**
-//	 *  This is a high level implementation of a dirty state, it allows to track when an entity was actually updated, it avoids unnecessary updates, should be provided by hibernate but for some reason its not working at lowlevel
-//	 */
-//
-//	/** Initialy dirty is true, since was never persisted */
-//	@Transient
-//	@JsonIgnore
-//	@Setter(AccessLevel.NONE)
-//	@Getter(AccessLevel.NONE)
-//	protected Boolean dirty = true;
-//	
-//	@JsonIgnore
-//	protected void markAsDirty() {
-//		dirty = true;
-//	}
-//	
-//	public Boolean isDirty() {
-//		return dirty;
-//	}
-
-
-	// this member must not have public getter/setter
-	@JsonIgnore
-	@ManyToMany(cascade = {CascadeType.MERGE}, fetch = FetchType.LAZY)
-	protected Set<FieldOccurrence> occurrences = new HashSet<FieldOccurrence>();
-
-	@Transient
+	//@Convert(converter = MultiMapFieldOcurrenceAttributeConverter.class)
 	@Setter(AccessLevel.NONE)
-	@Getter(AccessLevel.NONE)
-	protected Multimap<String, FieldOccurrence> occurrencessByFieldName;
+	@JsonIgnore
+	@Transient
+	protected Multimap<String, FieldOccurrence> occurrencesByFieldName = LinkedHashMultimap.create();
+
+	@Column(name="fieldvalues", columnDefinition="TEXT")
+	protected String serializedFieldOccurrences = "{}";
+
+	@PostLoad
+	protected void postLoad() {
+		this.occurrencesByFieldName = converter.convertToEntityAttribute(this.serializedFieldOccurrences);
+	}
+
+	@PrePersist
+	@PreUpdate
+	protected void prePersist() {
+		this.serializedFieldOccurrences = converter.convertToDatabaseColumn(this.occurrencesByFieldName);
+	}
 
 	/**
-	 * Loads plain list of occurrences into a complex map structure
-	 */
-	private void loadOccurrencesIntoMultimap() {
-		
-		if ( occurrencessByFieldName == null ) {
-			occurrencessByFieldName = ArrayListMultimap.create();
-			for (FieldOccurrence occr : occurrences) 
-				occurrencessByFieldName.put(occr.getFieldName(), occr);
-		}
-	}
-	
-	/**
-	 * Builds and returns occurrences by fieldname
-	 * ATENTION: this method will trigger the loading of all ocurrences into a map, should be avoided in massive tasks 
+	 * Returns occurrences by fieldname
 	 * @return
 	 */
 	@JsonIgnore
 	public Collection<FieldOccurrence> getFieldOccurrences(String fieldName) {
-		loadOccurrencesIntoMultimap();
-		return this.occurrencessByFieldName.get(fieldName);
-	}
-	
-	/**
-	 * Builds and returns all occurrences as a map of fieldname, occurrences
-	 * ATENTION: this method will trigger the loading of all ocurrences into a map, should be avoided in massive tasks 
-	 * @return
-	 */
-	@JsonProperty("fields")
-	public Map<String, Collection<FieldOccurrence>> getOccurrencesAsMap() {
-		loadOccurrencesIntoMultimap();
-		return occurrencessByFieldName.asMap();
-	
+
+		Collection<FieldOccurrence> occurrences = this.occurrencesByFieldName.get(fieldName);
+		if (occurrences == null) 
+			return new LinkedHashSet<FieldOccurrence>();
+		else
+			return occurrences;
 	}
 
-	public void addFieldOccurrence(FieldOccurrence occr) throws EntityRelationException {
-		
-		occurrencessByFieldName = null;
-		
-		if ( occr.getContent() == null )
-			throw new EntityRelationException("FieldOccurrenceContainder::addFieldOccurrence Error: Data must not be null");
-		
-		// using set enforce this, so check is no longer needed
-		if ( !occurrences.contains(occr) ) { // add the occurrence only if is new
-			occurrencessByFieldName = null;
-		//	occr.addContainer(this);
-			this.occurrences.add(occr);
-			//dirty = true;
-		}
+	/**
+	 * Builds and returns all occurrences as a map of fieldname, occurrences
+	 * ATENTION: this method will trigger the loading of all ocurrences into a map, should be avoided in massive tasks
+	 * @return
+	 */
+	@JsonProperty(FIELDOCCURRENCE_JSON_OCURRENCES_FIELD)
+	@JsonInclude(Include.NON_EMPTY)
+	public Map<String, Collection<FieldOccurrence>> getFieldOccurrencesAsMap() {
+		return occurrencesByFieldName.asMap();
 	}
-	
-	public void addFieldOccurrences(Collection<FieldOccurrence> occrs) throws EntityRelationException {
-		
-		for (FieldOccurrence occr : occrs) 
-			this.addFieldOccurrence(occr);
-		
+
+	public void addFieldOccurrence(String fieldName, FieldOccurrence occurrence) {
+		this.occurrencesByFieldName.put(fieldName, occurrence);
 	}
 	
 	public void removeAllFieldOccurrences() {
-		this.occurrences = new HashSet<FieldOccurrence>(); // blank occurrences in the duplicate
-		this.occurrencessByFieldName = null;
+		this.occurrencesByFieldName.clear();
 	}
 
-	
-	
+	public String toString() {
+		return "fields: " + this.getFieldOccurrencesAsMap();
+	}	
+
 }

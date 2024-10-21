@@ -33,29 +33,25 @@ import lombok.NoArgsConstructor;
 @jakarta.persistence.Table(name = "semantic_identifier")
 @EqualsAndHashCode(callSuper = false, onlyExplicitlyIncluded = true)
 @NoArgsConstructor
-public class SemanticIdentifier extends CacheableEntityBase<Long>  {
+public class SemanticIdentifier extends CacheableEntityBase<String>  {
 
 	@Id
-	@Getter
-	//@Column(columnDefinition = "BIGINT UNSIGNED")
-	@EqualsAndHashCode.Include
-	private Long id;
-	
 	@Getter
 	@Column(name = "semantic_id")
 	private String identifier;
 		
 	public SemanticIdentifier(String semanticId) { 
 		this.identifier = semanticId;
-		this.id = hashCodeLong();
 	}
 	
 	@Override
 	public String toString() {
 		return identifier;	
-	}
+	}	
 
-	public Long hashCodeLong() {
-		return XXHash64Hashing.calculateHashLong( this.identifier );
-	}		
+	@Override
+	public String getId() {
+		return identifier;
+	}
+	
 }

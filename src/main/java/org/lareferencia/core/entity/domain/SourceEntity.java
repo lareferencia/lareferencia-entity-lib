@@ -27,6 +27,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinColumns;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
@@ -38,17 +39,10 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 
 import lombok.Getter;
-import lombok.Setter;
 
 @jakarta.persistence.Entity
 @Table(name = "source_entity", 
 indexes = { @Index(name = "idx_final_entity_id",  columnList="final_entity_id", unique = false) })
-@AssociationOverride( name="occurrences",
-joinTable=@JoinTable(name = "source_entity_fieldoccr", 
-					   joinColumns = @JoinColumn(name = "entity_id"), 
-					   inverseJoinColumns = @JoinColumn(name = "fieldoccr_id"), 
-					   indexes = { @Index(name = "sfo_entity_id",  columnList="entity_id", unique = false),
-						       @Index(name = "sfo_fieldoccr_id",  columnList="fieldoccr_id", unique = false)}))
 @AssociationOverride( name="semanticIdentifiers",
 joinTable=@JoinTable( name = "source_entity_semantic_identifier", 
 		  joinColumns = @JoinColumn(name = "entity_id"), 
@@ -56,7 +50,7 @@ joinTable=@JoinTable( name = "source_entity_semantic_identifier",
 		  indexes = { @Index(name = "ssi_entity_id",  columnList="entity_id", unique = false),
 			       @Index(name = "ssi_semantic_id",  columnList="semantic_id", unique = false)}
 ))
-public class SourceEntity extends BaseEntity<SourceRelation>  {
+public class SourceEntity extends BaseEntity  {
 
 			
 	public SourceEntity() {
@@ -65,8 +59,9 @@ public class SourceEntity extends BaseEntity<SourceRelation>  {
 
 	public SourceEntity(EntityType type, Provenance provenance) {
 		super(type);
+		this.source = provenance.getSource();
+		this.record = provenance.getRecord();
 		this.provenance = provenance;
-		this.provenanceId = provenance.getId();
 	}
 
 	@Getter
@@ -80,21 +75,24 @@ public class SourceEntity extends BaseEntity<SourceRelation>  {
 	@Column(name = "final_entity_id", insertable = false, updatable = false)
 	protected UUID finalEntityId;
 	
-	@Setter
+	@JsonIgnore
 	@Getter
-	@Column(name = "deleted")
-	private Boolean deleted = false;
-	
-	@Getter
-	@ManyToOne(fetch = FetchType.LAZY)
-	@JoinColumn(name = "provenance_id")
-	protected Provenance provenance;
+	@Column(name = "source", insertable = false, updatable = false)
+	protected String source;
 
 	@JsonIgnore
 	@Getter
-	@Column(name = "provenance_id", insertable = false, updatable = false)
-	protected Long provenanceId;
-	
+	@Column(name = "record", insertable = false, updatable = false)
+	protected String record;
+
+	@Getter
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumns( {
+		@JoinColumn(name="source", referencedColumnName="source"),
+		@JoinColumn(name="record", referencedColumnName="record")
+	} )
+	protected Provenance provenance;
+
 	public Long hashCodeLong() {
 		return XXHash64Hashing.calculateHashLong( this.toString() );
 	}
@@ -103,11 +101,5 @@ public class SourceEntity extends BaseEntity<SourceRelation>  {
 		this.finalEntity = finalEntity;
 		this.finalEntityId = finalEntity.getId();
 	}
-
-//	@Override
-//	public String toString() {
-//		return entityTypeId + "::" + sourceId + "::" + recordId + "::" + itemId;
-//	}
-//	
 
 }

@@ -20,34 +20,36 @@
 
 package org.lareferencia.core.entity.domain;
 
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.Set;
 
 import jakarta.persistence.AssociationOverride;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 
 import org.springframework.data.rest.core.annotation.RestResource;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.google.common.collect.LinkedHashMultimap;
+import com.google.common.collect.Multimap;
 
+import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 
 @Table(name = "entity")
 @jakarta.persistence.Entity
-@AssociationOverride( name="occurrences",
-joinTable=@JoinTable(name = "entity_fieldoccr", 
-					   joinColumns = @JoinColumn(name = "entity_id"), 
-					   inverseJoinColumns = @JoinColumn(name = "fieldoccr_id"), 
-					   indexes = { @Index(name = "efo_entity_id",  columnList="entity_id", unique = false),
-							       @Index(name = "efo_fieldoccr_id",  columnList="fieldoccr_id", unique = false)}
-))
 @AssociationOverride( name="semanticIdentifiers",
 joinTable=@JoinTable( name = "entity_semantic_identifier", 
 		  joinColumns = @JoinColumn(name = "entity_id"), 
@@ -55,7 +57,9 @@ joinTable=@JoinTable( name = "entity_semantic_identifier",
 		  indexes = { @Index(name = "esi_entity_id",  columnList="entity_id", unique = false),
 			       @Index(name = "esi_semantic_id",  columnList="semantic_id", unique = false)}
 ))
-public class Entity extends BaseEntity<Relation>   {
+public class Entity extends BaseEntity  {
+
+	private static final MultiMapRelationAttributeConverter converter = new MultiMapRelationAttributeConverter();
 
 	public static final String NAME = "entity";
 	
@@ -67,30 +71,58 @@ public class Entity extends BaseEntity<Relation>   {
 		super(type);
 	}
 	
-	
 	@JsonIgnore
 	@RestResource(exported = false)
 	@Getter
 	@OneToMany(mappedBy = "finalEntity", fetch = FetchType.LAZY)
 	private Set<SourceEntity> sourceEntities = new HashSet<SourceEntity>();
-	
-	@JsonIgnore
-	@Getter
-	@RestResource(rel="fromRelations",  path="fromRelations", exported = false)
-	@OneToMany(mappedBy = "fromEntity", fetch = FetchType.LAZY)
-	private Set<Relation> fromRelations = new HashSet<Relation>();
-	
-	@JsonIgnore
-	@Getter
-	@RestResource(rel="toRelations",  path="toRelations", exported = false)
-	@OneToMany(mappedBy = "toEntity", fetch = FetchType.LAZY)
-	private Set<Relation> toRelations = new HashSet<Relation>();
-		
+
 	@Setter
 	@Getter
 	@JsonIgnore
 	@Column(name = "dirty")
 	private Boolean dirty = true;
 	
+	//@Convert(converter = MultiMapRelationAttributeConverter.class)
+	@Setter(AccessLevel.NONE)
+	@Transient
+	protected Multimap<String, Relation> relationsByName = LinkedHashMultimap.create();
+
+	@Column(name="relations", columnDefinition="TEXT")
+	protected String serializedRelations = "{}";
+
+	@PostLoad
+	protected void postLoad() {
+		super.postLoad();
+		this.relationsByName = converter.convertToEntityAttribute(this.serializedRelations);
+	}
+
+	@PrePersist
+	@PreUpdate
+	protected void prePersist() {
+		super.prePersist();
+		this.serializedRelations = converter.convertToDatabaseColumn(this.relationsByName);
+	}
+	
+	/**
+	 * Returns occurrences by fieldname
+	 * @return
+	 */
+	@JsonIgnore
+	public Collection<Relation> getRelationsByType(String type) {
+
+		Collection<Relation> relations = this.relationsByName.get(type);
+
+		if (relations == null)
+			return new HashSet<Relation>();
+		else
+			return relations;
+
+	}
+
+	@JsonIgnore
+	public Collection<String> getRelatioTypes() {
+		return this.relationsByName.keySet();
+	}
 
 }

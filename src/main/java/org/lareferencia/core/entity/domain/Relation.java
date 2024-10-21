@@ -20,43 +20,30 @@
 
 package org.lareferencia.core.entity.domain;
 
-import jakarta.persistence.AssociationOverride;
-import jakarta.persistence.Column;
-import jakarta.persistence.Index;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.JoinTable;
-import jakarta.persistence.Table;
+import java.util.UUID;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.Setter;
+import lombok.NoArgsConstructor;
+import lombok.ToString;
 
-@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
-@Table(name = "relation", indexes = { @Index(name = "relation_type_members",  columnList="relation_type_id,from_entity_id,to_entity_id", unique = false) } )
-@jakarta.persistence.Entity
-@AssociationOverride( name="occurrences",
-joinTable=@JoinTable(name = "relation_fieldoccr", 
-					   joinColumns = {@JoinColumn(name = "from_entity_id"), @JoinColumn(name = "relation_type_id"), @JoinColumn(name = "to_entity_id")}, 
-					   inverseJoinColumns = @JoinColumn(name = "fieldoccr_id")))
-public class Relation extends BaseRelation<Entity> {
+@JsonDeserialize(using = RelationDeserializer.class)
+@NoArgsConstructor
+@EqualsAndHashCode(callSuper = false)
+@ToString(callSuper = true)
+public class Relation extends FieldOccurrenceContainer {
 
-	public Relation() {
-		super();
-	}
+	public static final String RELATION_JSON_TARGET_FIELD = "t";
 
-	public Relation(RelationType relationType, Entity fromEntity, Entity toEntity) {
-		super(relationType, fromEntity, toEntity);
-	}
-	
-	@Setter
 	@Getter
-	@JsonIgnore
-	@Column(name = "dirty")
-	private Boolean dirty = true;
+	@JsonProperty(RELATION_JSON_TARGET_FIELD)
+	UUID target;
+
+	public Relation(UUID target) {
+		this.target = target;
+	}
 	
-
-
-
 }

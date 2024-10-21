@@ -26,7 +26,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
@@ -34,13 +33,11 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.MappedSuperclass;
-import jakarta.persistence.OneToMany;
 import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.Transient;
 
 import org.springframework.data.domain.Persistable;
-import org.springframework.data.rest.core.annotation.RestResource;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -52,8 +49,7 @@ import lombok.Setter;
 
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @MappedSuperclass
-//@Inheritance(strategy = InheritanceType.TABLE_PER_CLASS)
-public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrenceContainer implements Persistable<UUID>  {
+public abstract class BaseEntity extends FieldOccurrenceContainer implements Persistable<UUID>  {
 	
 	
 	@Setter(AccessLevel.NONE)
@@ -127,19 +123,8 @@ public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrence
 	@Column(name = "entity_type_id", insertable = false, updatable = false)
 	protected Long entityTypeId;
 			
-	@ManyToMany(cascade = {CascadeType.DETACH}, fetch = FetchType.LAZY)
+	@ManyToMany(fetch = FetchType.LAZY)
 	protected Set<SemanticIdentifier> semanticIdentifiers = new HashSet<SemanticIdentifier>();
-	
-	
-	@RestResource(exported = false)
-	@Getter
-	@OneToMany(mappedBy = "fromEntity", fetch = FetchType.LAZY)
-	private Set<T> fromRelations = new HashSet<T>();
-	
-	@RestResource(exported = false)
-	@Getter
-	@OneToMany(mappedBy = "toEntity", fetch = FetchType.LAZY)
-	private Set<T> toRelations = new HashSet<T>();
 	
 	
 	/**
@@ -159,22 +144,14 @@ public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrence
 		return entityType.getName();
 	}
 	
-	
 	public void addSemanticIdentifier(SemanticIdentifier semanticIdentifier) {
-		
-		/** Check if this identifiers was not linked to this entity before */
-		if ( ! semanticIdentifiers.contains( semanticIdentifier ) ){
-			this.semanticIdentifiers.add( semanticIdentifier );
-//			markAsDirty(); // the entity was actually updated
-		}
+		semanticIdentifiers.add(semanticIdentifier);		
 	}
 	
 	public void addSemanticIdentifiers(Collection<SemanticIdentifier> semanticIdentifiers) {
-		
 		for ( SemanticIdentifier semId : semanticIdentifiers )
 			this.addSemanticIdentifier(semId);
 	}
-	
 	
 	public void removeAllSemanticIdentifiers() {
 		this.semanticIdentifiers.clear();
@@ -194,7 +171,8 @@ public abstract class BaseEntity<T extends BaseRelation> extends FieldOccurrence
 		
 	@Override
 	public String toString() {
-		return "Entity [Id=" + getId() + "]";
+		return "Entity [Id=" + getId() + ", Type=" + entityType.getName() + ", SemanticIdentifiers=" 
+		+ semanticIdentifiers + "]" + this.getFieldOccurrencesAsMap();
 	}
 
 }

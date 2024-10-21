@@ -23,12 +23,7 @@ package org.lareferencia.core.entity.domain;
 import java.util.Hashtable;
 import java.util.Map;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.DiscriminatorValue;
-
-import org.lareferencia.core.util.MapAttributeConverter;
-
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -38,51 +33,25 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @NoArgsConstructor
-@jakarta.persistence.Entity
-@DiscriminatorValue("C")
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class ComplexFieldOccurrence extends FieldOccurrence {
 	
-	
 	final static ObjectMapper jsonMapper = new ObjectMapper();
 	
+	@Setter(AccessLevel.NONE)
+	@EqualsAndHashCode.Include
+	@JsonProperty(FIELDOCCURRENCE_JSON_VALUE_FIELD)
+    Map<String, String> content = new Hashtable<String, String>();
 
-    public ComplexFieldOccurrence(FieldType field) {
-		super(field);
+	public ComplexFieldOccurrence(Map<String, String> content) {
+		this.content = content;
+	}
+    	
+	public ComplexFieldOccurrence addValue(String fieldname, String value) {
+		this.content.put(fieldname, value);
+		return this;
 	}
 
-	/**
-	 * { subfield_name: value }
-	 * Table<subfield, value>
-	 **/
-	@Setter(AccessLevel.NONE)
-	@Column(name="content", columnDefinition="TEXT")
-	@Convert(converter = MapAttributeConverter.class)
-	@EqualsAndHashCode.Include
-    Map<String, String> content = new Hashtable<String, String>();
-    
-	
-	 /**
-     * params[0] = subfieldname
-     * params[1] = value
-     */
-    public FieldOccurrence addValue(String ... params) throws EntityRelationException {
-    	
-		if ( params.length != 2)
-			throw new EntityRelationException("Complex FieldOccurrence :: addValue incorret parameters !! " + params );
-    	
-    	String subfieldName = params[0];
-    	String value = params[1];
-    	
-		// if not subfield name supplied $ is used (means root content of the field)
-		if ( !fieldType.isSubfield(subfieldName) ) 
-				throw new EntityRelationException("FieldOccurrence :: subfield " + subfieldName + " doesn´t exist in " + fieldType.getName() );
-
-		this.content.put(subfieldName, value);
-		
-		return this;
-    }
-    
     /**
      * params[0] = subfieldname
      */
@@ -101,22 +70,15 @@ public class ComplexFieldOccurrence extends FieldOccurrence {
 		
 	    	String subfieldName = params[0];
 	    
-			// if not subfield name supplied $ is used (means root content of the field)
-			if ( subfieldName == null || !fieldType.isSubfield(subfieldName) ) 
-					throw new EntityRelationException("FieldOccurrence :: subfield " + subfieldName + " doesn´t exist in " + fieldType.getName() );
-	
 			return this.content.get(subfieldName);
 		
 		} 
 
 	}
 	
-
 	@Override
 	public Object getContent() {
 		return content; 
 	}
-
-
 
 }

@@ -26,25 +26,28 @@ import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 
 
-public class SemanticIdentifierCachedStore extends ConcurrentCachedStore<String, SemanticIdentifier, SemanticIdentifierRepository> {
+public class SemanticIdentifierStore {
 
-    public SemanticIdentifierCachedStore(SemanticIdentifierRepository repository, Integer capacity) {
-        super(repository, capacity, false, 0);
+    SemanticIdentifierRepository repository;
+
+    public SemanticIdentifierStore(SemanticIdentifierRepository repository) {
+        this.repository = repository;
     }
 
-    public synchronized Loaded<SemanticIdentifier> loadOrCreate(String semantiIdentifier, Boolean readOnly) {
 
-        SemanticIdentifier existingSemanticIdentifier = this.get( semantiIdentifier );
+    public synchronized Loaded<SemanticIdentifier> loadOrCreate(String semantiIdentifier, Boolean persist) {
+
+        SemanticIdentifier existingSemanticIdentifier = repository.findById(semantiIdentifier).orElse(null);
 
         if ( existingSemanticIdentifier == null ) {
 
             SemanticIdentifier createdSemanticIdentifier = new SemanticIdentifier(semantiIdentifier);
 
-            // if readOnly is true, we don't persist the new semantic identifier by calling putWithoutPersist
-            if (readOnly)
-                this.putWithoutPersist(semantiIdentifier, createdSemanticIdentifier);
-            else
-                this.put(semantiIdentifier, createdSemanticIdentifier);
+            // if persist is false, we don't persist the new semantic identifier
+            if (persist) {
+                repository.save(createdSemanticIdentifier);
+                createdSemanticIdentifier.markAsStored();
+            }
             
             return new Loaded<SemanticIdentifier>(createdSemanticIdentifier, true);
         }
@@ -54,7 +57,7 @@ public class SemanticIdentifierCachedStore extends ConcurrentCachedStore<String,
     }
 
     public synchronized Loaded<SemanticIdentifier> loadOrCreate(String semantiIdentifier) {
-        return loadOrCreate(semantiIdentifier, false);
+        return loadOrCreate(semantiIdentifier, true);
     }
 
 

@@ -51,10 +51,12 @@ import lombok.Setter;
 @Table(name = "field_type")
 @jakarta.persistence.Entity
 public class FieldType implements Serializable {
-	
+
+
 	static public enum Kind { SIMPLE, COMPLEX };
 
 	@Setter(AccessLevel.NONE)
+	@Getter
 	@Id
 	@GeneratedValue(strategy=GenerationType.IDENTITY)
 	@EqualsAndHashCode.Include
@@ -66,6 +68,7 @@ public class FieldType implements Serializable {
 	private EntityRelationType entityRelationType;
 
 	@EqualsAndHashCode.Include
+	@Getter
 	private String  name;
 	
 	private String  description;
@@ -88,20 +91,20 @@ public class FieldType implements Serializable {
 	
 	public Boolean hasSubfields() { return kind != Kind.SIMPLE; }
 
-	public FieldOccurrence buildFieldOccurrence() {
+	// public FieldOccurrence buildFieldOccurrence() {
 		
-		switch (kind) {
+	// 	switch (kind) {
 		
-		case SIMPLE:
-			return new SimpleFieldOccurrence(this);
+	// 	case SIMPLE:
+	// 		return new SimpleFieldOccurrence(this);
 			
-		case COMPLEX:
-			return new ComplexFieldOccurrence(this);
+	// 	case COMPLEX:
+	// 		return new ComplexFieldOccurrence(this);
 			
-		default:
-			return null;
-		}
-	}
+	// 	default:
+	// 		return null;
+	// 	}
+	// }
 	public void addSubfield(String fieldName) {
 		this.subfields.add(fieldName);
 	}
