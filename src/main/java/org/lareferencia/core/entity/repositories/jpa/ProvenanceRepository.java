@@ -22,18 +22,16 @@ package org.lareferencia.core.entity.repositories.jpa;
 
 
 import org.lareferencia.core.entity.domain.Provenance;
+import org.lareferencia.core.entity.domain.ProvenanceId;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Modifying;
-import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
-import java.time.LocalDateTime;
 
 
 @RepositoryRestResource(path = "provenance", collectionResourceRel = "provenance")
-public interface ProvenanceRepository extends JpaRepository<Provenance, Long> {
+public interface ProvenanceRepository extends JpaRepository<Provenance, ProvenanceId> {
 
-    @Modifying
-    @Query("update Provenance p set p.lastUpdate = ?2 where p.id = ?1")
-    void setLastUpdate(Long id, LocalDateTime lastUpdate);
+    // @Modifying
+    // @Query("update Provenance p set p.lastUpdate = ?3 where p.source = ?1 and p.record = ?2")
+    // void setLastUpdate(String source, String record, LocalDateTime lastUpdate);
 }
