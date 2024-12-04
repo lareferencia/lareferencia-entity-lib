@@ -289,26 +289,26 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 								+ " does not contain a indexing config for " + type.getName() + " EntityType");
 
 			// get the relations for the entity
-			Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
+			//Multimap<String, Relation> relationsMap = this.getRelationMultimap(entity);
 
 			// create the elastic entity from the entity and the relations
-			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity, relationsMap);
+			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity);
 
-			// get the nested entities and create the related elastic entities
-			for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
+			// get the from nested entities and create the related elastic entities
+			for (EntityIndexingConfig fromNestedEntityConfig : entityIndexingConfig.getIndexFromNestedEntities()) {
 
-				String relationName = nestedEntityConfig.getEntityRelation();
-				// get the relations for the nested entity
-				for (Relation relation : relationsMap.get(relationName)) {
-					//
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-					// get the relations for the related entity
-					Multimap<String, Relation> relatedEntityRelationsMap = this.getRelationMultimap(relatedEntity);
-					// create the related elastic entity
-					JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig, relatedEntity,
-							relatedEntityRelationsMap);
-					// add the related elastic entity to the parent entity
-					elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), relatedElasticEntity);
+				for ( Entity nestedFromRelatedEntity : entityDataService.getFromRelatedEntities(entity, fromNestedEntityConfig.getEntityRelation()) ) {
+					JSONEntityElastic relatedElasticEntity = createElasticEntity(fromNestedEntityConfig, nestedFromRelatedEntity);
+					elasticEntity.addRelatedEntity(fromNestedEntityConfig.getName(), relatedElasticEntity);
+				}
+			}
+
+			// get the to nested entities and create the related elastic entities
+			for (EntityIndexingConfig toNestedEntityConfig : entityIndexingConfig.getIndexToNestedEntities()) {
+
+				for ( Entity nestedToRelatedEntity : entityDataService.getToRelatedEntities(entity, toNestedEntityConfig.getEntityRelation()) ) {
+					JSONEntityElastic relatedElasticEntity = createElasticEntity(toNestedEntityConfig, nestedToRelatedEntity);
+					elasticEntity.addRelatedEntity(toNestedEntityConfig.getName(), relatedElasticEntity);
 				}
 			}
 
@@ -329,8 +329,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	 * @param relationsMap
 	 * @throws EntityIndexingException
 	 */
-	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity,
-			Multimap<String, Relation> relationsMap) throws EntityIndexingException {
+	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity) throws EntityIndexingException {
 
 		// create the elastic entity
 		JSONEntityElastic jsonEntityElastic = new JSONEntityElastic();
@@ -352,7 +351,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			// set the entity fields
 			for (FieldIndexingConfig fieldConfig : config.getIndexFields())
 				try {
-					processFieldConfig(entity, relationsMap, fieldConfig, jsonEntityElastic);
+					processFieldConfig(entity, fieldConfig, jsonEntityElastic);
 				} catch (Exception e) {
 					throw new EntityIndexingException("Error processing field: " + fieldConfig.getName() + " :: " + e.getMessage() );
 				}
@@ -449,29 +448,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		typesMapping.put(ID_FIELD, createTypeMapping(ID_FIELD_TYPE));
 
 		// add nested entities to mapping
-		entityIndexingConfig.getIndexNestedEntities().forEach( nestedEntityConfig -> {
-			HashMap<String, Object> nestedTypesMapping = new HashMap<String, Object>();
-			HashMap<String, Object> nestedMapping = new HashMap<String, Object>();
-			nestedMapping.put(MAPPING_PROPERTIES_STR , nestedTypesMapping);
-			typesMapping.put(nestedEntityConfig.getName(), nestedMapping);
-
-			// add fields to mapping
-			for ( FieldIndexingConfig fieldConfig : nestedEntityConfig.getIndexFields() ) {
-
-				// create field mapping
-				Map<String, Object> fieldMapping =  createTypeMapping( fieldConfig.getType() );
-
-				// add elastic params to mapping
-				addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
-
-				// add field mapping to type mapping
-				nestedTypesMapping.put(fieldConfig.getName(), fieldMapping);
-			}	
-
-			// add id field to mapping
-			nestedTypesMapping.put(ID_FIELD , createTypeMapping(ID_FIELD_TYPE));
-		});
-
+		addNestedEntitiesToMapping(entityIndexingConfig.getIndexFromNestedEntities(), typesMapping);
+		addNestedEntitiesToMapping(entityIndexingConfig.getIndexToNestedEntities(), typesMapping);
+	
 		// check if index exists
 		try {
 			Boolean indexExists = elasticClient.indices().exists(new GetIndexRequest(entityIndexingConfig.getName() ), RequestOptions.DEFAULT);
@@ -500,6 +479,30 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		}
 	}
 
+	private void addNestedEntitiesToMapping(Collection<EntityIndexingConfig> nestedEntityConfigs, HashMap<String, Object> typesMapping) {
+		nestedEntityConfigs.forEach(nestedEntityConfig -> {
+			HashMap<String, Object> nestedTypesMapping = new HashMap<String, Object>();
+			HashMap<String, Object> nestedMapping = new HashMap<String, Object>();
+			nestedMapping.put(MAPPING_PROPERTIES_STR, nestedTypesMapping);
+			typesMapping.put(nestedEntityConfig.getName(), nestedMapping);
+
+			// add fields to mapping
+			for (FieldIndexingConfig fieldConfig : nestedEntityConfig.getIndexFields()) {
+				// create field mapping
+				Map<String, Object> fieldMapping = createTypeMapping(fieldConfig.getType());
+
+				// add elastic params to mapping
+				addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
+
+				// add field mapping to type mapping
+				nestedTypesMapping.put(fieldConfig.getName(), fieldMapping);
+			}
+
+			// add id field to mapping
+			nestedTypesMapping.put(ID_FIELD, createTypeMapping(ID_FIELD_TYPE));
+		});
+	}
+
 	protected JSONEntityElastic createIEntity(String id, String type) {
 		return new JSONEntityElastic(id, type);
 	}
@@ -521,56 +524,52 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	}
 
-	private Multimap<String, Relation> getRelationMultimap(Entity entity) throws EntityRelationException {
+	private void processFieldConfig(Entity entity, FieldIndexingConfig config, JSONEntityElastic ientity) throws EntityIndexingException {
 
-		Multimap<String, Relation> relationsByName = ArrayListMultimap.create();
-
-		for (Relation relation : entity.getFromRelations()) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
-			relationsByName.put(rtype.getName(), relation);
-		}
-
-		for (Relation relation : entity.getToRelations()) {
-			RelationType rtype = entityDataService.getRelationTypeFromId(relation.getRelationTypeId());
-			relationsByName.put(rtype.getName(), relation);
-		}
-
-		return relationsByName;
-	}
-
-	private void processFieldConfig(Entity entity, Multimap<String, Relation> relationsMap, FieldIndexingConfig config,
-			JSONEntityElastic ientity) throws EntityIndexingException {
-
-
-		String sourceFieldName = config.getSourceField();
-
-		// tratar caso de lista de campos
-
-
-		if (sourceFieldName == null)
+		if (config.getSourceField() == null)
 			throw new EntityIndexingException(
 					"Error Indexing Entity Field " + config.getName() + " source field is not defined");
 
-		if (config.getSourceRelation() != null) {// is a relation indexing
+		try {
 
-			for (Relation relation : relationsMap.get(config.getSourceRelation())) {
+			if (config.getSourceFromRelation() != null ) {// is a relation FROM indexing
+
+					if (config.getSourceMember() != null) { // is a related entity field
+
+						// get the related entities
+						for (Entity relatedEntity : entityDataService.getFromRelatedEntities(entity, config.getSourceFromRelation()) ) 
+							processFieldOccurrence(relatedEntity.getFieldOccurrences( config.getSourceField() ), config, ientity);
+
+					} else {// is a relation attribute
+
+						// get the relations
+						for (Relation relation : entityDataService.getFromRelations(entity, config.getSourceFromRelation())) 
+							processFieldOccurrence(relation.getFieldOccurrences( config.getSourceField() ), config, ientity);
+					}
+
+			} else if ( config.getSourceToRelation() != null ) {// is a TO relation indexing
 
 				if (config.getSourceMember() != null) { // is a related entity field
 
-					Entity relatedEntity = relation.getRelatedEntity(entity.getId());
-
-					// add all occrs of the given source field from all entities of type source
-					// member related by source relation
-					processFieldOccurrence(relatedEntity.getFieldOccurrences(sourceFieldName), config, ientity);
+					// get the related entities
+					for (Entity relatedEntity : entityDataService.getToRelatedEntities(entity, config.getSourceToRelation()) ) 
+						processFieldOccurrence(relatedEntity.getFieldOccurrences( config.getSourceField() ), config, ientity);
 
 				} else {// is a relation attribute
 
-					processFieldOccurrence(relation.getFieldOccurrences(sourceFieldName), config, ientity);
+					// get the relations
+					for (Relation relation : entityDataService.getToRelations(entity, config.getSourceToRelation())) 
+						processFieldOccurrence(relation.getFieldOccurrences( config.getSourceField() ), config, ientity);
 				}
-			}
 
-		} else {// is a entity field
-			processFieldOccurrence(entity.getFieldOccurrences(sourceFieldName), config, ientity);
+			} else {// is a entity field so process the field occurrences
+				processFieldOccurrence(entity.getFieldOccurrences( config.getSourceField() ), config, ientity);
+			}
+		} catch (Exception e) {
+
+			throw new EntityIndexingException("Error processing field: " + config.getSourceField() + " subfield: "
+					+ config.getSourceSubfield() + "::" + e.getMessage());
+		
 		}
 	}
 
@@ -579,6 +578,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		
 		// if field filter is defined and the services is available, apply it
 		if ( fieldOccurrenceFilterService != null && config.getFilter() != null ) {
+
 			// get the params from the config
 			Map<String, String> filterParams = config.getParams();
 

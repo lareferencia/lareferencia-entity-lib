@@ -21,7 +21,7 @@
 package org.lareferencia.core.entity.repositories.jpa;
 
 
-import java.time.format.DateTimeFormatter;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -30,6 +30,7 @@ import java.time.LocalDateTime;
 
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
+import org.lareferencia.core.entity.domain.Relation;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -83,18 +84,30 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 	// End Entity Paginator methods
 
-	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
-	Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
+	// @Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
+	// Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
 
-	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.id.relationTypeId = ?2")
-	Page<Entity> findRelatedToEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
+	// @Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.id.relationTypeId = ?2")
+	// Page<Entity> findRelatedToEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
 
-	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.name = ?2")
-	Page<Entity> findRelatedFromEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
+	// @Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.name = ?2")
+	// Page<Entity> findRelatedFromEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
-	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.name = ?2")
-	Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
+	// @Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.name = ?2")
+	// Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
+
+	@Query("Select r from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
+	Collection<Relation> getFromRelations(UUID id, Long relationId);
+   
+	@Query("Select r from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
+	Collection<Relation> getToRelations(UUID id, Long relationId);
+
+	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
+	Collection<Entity> getToRelatedEntities(UUID id, Long relationId);
+
+	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
+	Collection<Entity> getFromRelatedEntities(UUID id, Long relationId);
 	
 	/*** Hidden in rest **/
 
@@ -120,7 +133,11 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	
 	@Query(value = "CALL merge_entity_relation_data(0);", nativeQuery = true)
 	int mergeEntiyRelationData();
+
    
+
+
+    
 
 	
 	

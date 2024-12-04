@@ -45,6 +45,7 @@ import org.lareferencia.core.entity.domain.EntityType;
 import org.lareferencia.core.entity.domain.FieldOccurrenceContainer;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.domain.Provenance;
+import org.lareferencia.core.entity.domain.Relation;
 import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.domain.SourceEntity;
@@ -512,6 +513,28 @@ public class EntityDataService {
 
 	public List<Entity> findEntitiesByProvenanceSourceAndRecordId(String sourceId, String recordId) {
 		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
+	}
+
+    public Collection<Relation> getFromRelations(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		return entityRepository.getFromRelations(entity.getId(), relationId);
+    }
+
+    public Collection<Entity> getFromRelatedEntities(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+
+		return entityRepository.getFromRelatedEntities(entity.getId(), relationId);
+    }
+
+	public Collection<Entity> getToRelatedEntities(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		return entityRepository.getToRelatedEntities(entity.getId(), relationId);
+	}
+
+	public Collection<Relation> getToRelations(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		return entityRepository.getToRelations(entity.getId(), relationId);
+		
 	}
 
 //	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {

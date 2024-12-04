@@ -64,8 +64,13 @@ public class FieldIndexingConfig {
 		return sourceSubfield;
 	}
 	
-	@XmlAttribute(name="source-relation")
-	public String getSourceRelation() {
+	@XmlAttribute(name="source-from-relation")
+	public String getSourceFromRelation() {
+		return sourceRelation;
+	}
+
+	@XmlAttribute(name="source-to-relation")
+	public String getSourceToRelation() {
 		return sourceRelation;
 	}
 	
