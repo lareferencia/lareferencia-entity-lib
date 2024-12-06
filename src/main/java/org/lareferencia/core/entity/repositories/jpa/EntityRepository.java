@@ -100,19 +100,16 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 
 	@Query("Select r.id from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Collection<UUID> getFromRelations(UUID id, Long relationId);
+	Set<UUID> getFromRelations(UUID id, Long relationId);
    
 	@Query("Select r.id from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Collection<UUID> getToRelations(UUID id, Long relationId);
+	Set<UUID> getToRelations(UUID id, Long relationId);
 
 	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Collection<UUID> getToRelatedEntitiesIds(UUID id, Long relationId);
+	Set<UUID> getToRelatedEntitiesIds(UUID id, Long relationId);
 
 	@Query("Select r.id.fromEntityId from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Collection<UUID> getFromRelatedEntitiesIds(UUID id, Long relationId);
-
-
-
+	Set<UUID> getFromRelatedEntitiesIds(UUID id, Long relationId);
 
 	
 	/*** Hidden in rest **/

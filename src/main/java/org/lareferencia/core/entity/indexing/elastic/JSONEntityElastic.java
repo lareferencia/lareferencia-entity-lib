@@ -27,7 +27,9 @@ import java.util.Map;
 import java.util.Set;
 
 import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.HashMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.SetMultimap;
 
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -52,7 +54,7 @@ public class JSONEntityElastic  {
 	protected List<String> provenanceIds = new ArrayList<String>();
 	protected String type;
 	
-	protected Multimap<String, String> occrsByFieldName = ArrayListMultimap.create();
+	protected SetMultimap<String, String> occrsByFieldName =  HashMultimap.create();
 	protected Multimap<String, JSONEntityElastic> entitiesByRelatedName = ArrayListMultimap.create();
 
 	public Set<String> getFieldNames() {

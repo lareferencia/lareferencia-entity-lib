@@ -44,8 +44,6 @@ import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityType;
 import org.lareferencia.core.entity.domain.FieldOccurrence;
-import org.lareferencia.core.entity.domain.Relation;
-import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.indexing.filters.FieldOccurrenceFilterService;
 import org.lareferencia.core.entity.indexing.nested.config.EntityIndexingConfig;
@@ -73,8 +71,6 @@ import org.springframework.beans.factory.annotation.Value;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Multimap;
 import org.springframework.context.ApplicationContext;
 
 import javax.net.ssl.SSLContext;
@@ -353,6 +349,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	 * @throws EntityIndexingException
 	 */
 	private void processNestedEntities(EntityIndexingConfig entityIndexingConfig, Entity entity, JSONEntityElastic elasticEntity, boolean isFromRelation) throws EntityIndexingException {
+
+		//System.out.println("Processing nested entities for entity: " + entity.getId() + " isFromRelation: " + isFromRelation);
+
 		Collection<EntityIndexingConfig> nestedEntityConfigs = isFromRelation ? entityIndexingConfig.getIndexFromNestedEntities() : entityIndexingConfig.getIndexToNestedEntities();
 	
 		for (EntityIndexingConfig nestedEntityConfig : nestedEntityConfigs) {
@@ -640,6 +639,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		else
 			occurrences = entityDataService.getFieldRelationFieldOccurrences(entityId, config.getSourceField() );		
 		
+		// if there are no occurrences, return
+		if (occurrences == null || occurrences.size() == 0)
+			return;	
 
 		// if field filter is defined and the services is available, apply it
 		if ( fieldOccurrenceFilterService != null && config.getFilter() != null ) {

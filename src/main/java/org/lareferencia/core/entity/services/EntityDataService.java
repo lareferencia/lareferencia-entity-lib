@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -516,36 +517,34 @@ public class EntityDataService {
 		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
 	}
 
-	public Collection<UUID> getFromRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getFromRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
 		return entityRepository.getFromRelations(entityId, relationId);
 	}
 
-	public Collection<UUID> getFromRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getFromRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
-
 		return entityRepository.getFromRelatedEntitiesIds(entityId, relationId);
-    }
+	}
 
-	public Collection<UUID> getToRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getToRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
 		return entityRepository.getToRelatedEntitiesIds(entityId, relationId);
 	}
 
-	public Collection<UUID> getToRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getToRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
 		return entityRepository.getToRelations(entityId, relationId);
 	}
 
 	// get all field occurrences of an entity by field name
-	public Collection<FieldOccurrence> getFieldEntityFieldOccurrences(UUID entityId, String fieldName) {
+	public Set<FieldOccurrence> getFieldEntityFieldOccurrences(UUID entityId, String fieldName) {
 		return fieldOccurrenceRepository.getEntityFieldOccurrencesByEntityIdAndFieldName(entityId, fieldName);
 	}
 
 	// get all field occurrences of a relation by field name
-	public Collection<FieldOccurrence> getFieldRelationFieldOccurrences(UUID relationId, String fieldName) {
+	public Set<FieldOccurrence> getFieldRelationFieldOccurrences(UUID relationId, String fieldName) {
 		return fieldOccurrenceRepository.getRelationFieldOccurrencesByRelationIdAndFieldName(relationId, fieldName);
-
 	}
 
 //	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {
