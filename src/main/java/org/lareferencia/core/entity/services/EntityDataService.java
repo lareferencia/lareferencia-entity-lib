@@ -42,10 +42,10 @@ import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityRelationType;
 import org.lareferencia.core.entity.domain.EntityType;
+import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldOccurrenceContainer;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.domain.Relation;
 import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.domain.SourceEntity;
@@ -124,8 +124,9 @@ public class EntityDataService {
 
 	@PostConstruct
 	private void postConstruct() {
-		entityTypeStore = new ConcurrentCachedNamedStore<>(entityTypeRepository, 100, true, 0);
-		relationTypeStore = new ConcurrentCachedNamedStore<>(relationTypeRepository, 100, true, 0);
+		entityTypeStore = new ConcurrentCachedNamedStore<>(entityTypeRepository, 500, true, 0);
+		relationTypeStore = new ConcurrentCachedNamedStore<>(relationTypeRepository, 500, true, 0);
+		
 
 		semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository, 1000);
 		provenanceStore = new ProvenanceStore(provenanceRepository);
@@ -515,26 +516,36 @@ public class EntityDataService {
 		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
 	}
 
-    public Collection<Relation> getFromRelations(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Collection<UUID> getFromRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getFromRelations(entity.getId(), relationId);
-    }
-
-    public Collection<Entity> getFromRelatedEntities(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
-		Long relationId = getRelationTypeFromName(relationName).getId();
-
-		return entityRepository.getFromRelatedEntities(entity.getId(), relationId);
-    }
-
-	public Collection<Entity> getToRelatedEntities(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
-		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getToRelatedEntities(entity.getId(), relationId);
+		return entityRepository.getFromRelations(entityId, relationId);
 	}
 
-	public Collection<Relation> getToRelations(Entity entity, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Collection<UUID> getFromRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getToRelations(entity.getId(), relationId);
-		
+
+		return entityRepository.getFromRelatedEntitiesIds(entityId, relationId);
+    }
+
+	public Collection<UUID> getToRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		return entityRepository.getToRelatedEntitiesIds(entityId, relationId);
+	}
+
+	public Collection<UUID> getToRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		return entityRepository.getToRelations(entityId, relationId);
+	}
+
+	// get all field occurrences of an entity by field name
+	public Collection<FieldOccurrence> getFieldEntityFieldOccurrences(UUID entityId, String fieldName) {
+		return fieldOccurrenceRepository.getEntityFieldOccurrencesByEntityIdAndFieldName(entityId, fieldName);
+	}
+
+	// get all field occurrences of a relation by field name
+	public Collection<FieldOccurrence> getFieldRelationFieldOccurrences(UUID relationId, String fieldName) {
+		return fieldOccurrenceRepository.getRelationFieldOccurrencesByRelationIdAndFieldName(relationId, fieldName);
+
 	}
 
 //	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {

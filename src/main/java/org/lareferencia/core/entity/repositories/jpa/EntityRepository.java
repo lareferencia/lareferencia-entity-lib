@@ -25,16 +25,18 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-
+import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
+import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.Relation;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 import org.springframework.data.rest.core.annotation.RestResource;
 
@@ -97,17 +99,21 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	// Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
 
-	@Query("Select r from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Collection<Relation> getFromRelations(UUID id, Long relationId);
+	@Query("Select r.id from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
+	Collection<UUID> getFromRelations(UUID id, Long relationId);
    
-	@Query("Select r from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Collection<Relation> getToRelations(UUID id, Long relationId);
+	@Query("Select r.id from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
+	Collection<UUID> getToRelations(UUID id, Long relationId);
 
-	@Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Collection<Entity> getToRelatedEntities(UUID id, Long relationId);
+	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
+	Collection<UUID> getToRelatedEntitiesIds(UUID id, Long relationId);
 
-	@Query("Select r.toEntity from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Collection<Entity> getFromRelatedEntities(UUID id, Long relationId);
+	@Query("Select r.id.fromEntityId from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
+	Collection<UUID> getFromRelatedEntitiesIds(UUID id, Long relationId);
+
+
+
+
 	
 	/*** Hidden in rest **/
 
@@ -133,6 +139,7 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	
 	@Query(value = "CALL merge_entity_relation_data(0);", nativeQuery = true)
 	int mergeEntiyRelationData();
+
 
    
 

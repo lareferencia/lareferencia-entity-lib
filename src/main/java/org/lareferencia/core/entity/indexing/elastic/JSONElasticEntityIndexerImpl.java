@@ -22,9 +22,12 @@
 package org.lareferencia.core.entity.indexing.elastic;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 
 import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
@@ -51,6 +54,7 @@ import org.lareferencia.core.entity.indexing.nested.config.IndexingConfiguration
 import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.services.EntityDataService;
+import org.lareferencia.core.entity.services.exception.EntitiyRelationXMLLoadingException;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
@@ -257,16 +261,33 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 			// check if the connection is ok
 			localClient.ping(RequestOptions.DEFAULT);
-            logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ") + (authenticate ? " using authentication" : ""));
+			logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ") + (authenticate ? " using authentication" : ""));
 
 			return localClient;
 
 		} catch (Exception e) {
-		    logger.error("Error connecting elasticsearch/opensearch:" + host + ":" + port + " :: " + e.getMessage());
+			logger.error("Error connecting elasticsearch/opensearch:" + host + ":" + port + " :: " + e.getMessage());
 			throw new EntityIndexingException(" Elastic Client creation error ");
 		}
 	}
 
+	/**
+	 * Indexes the given entity in an Elasticsearch bulk request that will be executed later.
+	 * 
+	 * @param entity The entity to be indexed.
+	 * @throws EntityIndexingException If there is an error during the indexing process.
+	 * 
+	 * This method performs the following steps:
+	 * 1. Retrieves the entity type using the entity's type ID.
+	 * 2. Fetches the entity indexing configuration for the retrieved entity type.
+	 * 3. Throws an EntityIndexingException if no configuration is found for the entity type.
+	 * 4. Creates an Elasticsearch entity from the given entity and its relations.
+	 * 5. Processes nested "from" entities.
+	 * 6. Processes nested "to" entities.
+	 * 7. Indexes the created Elasticsearch entity.
+	 * 
+	 * If any exception occurs during these steps, an EntityIndexingException is thrown with the error details.
+	 */
 	@Override
 	/**
 	 * Indexes the given entity in elasticsearch bulk request that will be executed later
@@ -294,24 +315,13 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			// create the elastic entity from the entity and the relations
 			JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity);
 
-			// get the from nested entities and create the related elastic entities
-			for (EntityIndexingConfig fromNestedEntityConfig : entityIndexingConfig.getIndexFromNestedEntities()) {
+			// Process nested "from" entities
+			processNestedEntities(entityIndexingConfig, entity, elasticEntity, true);
 
-				for ( Entity nestedFromRelatedEntity : entityDataService.getFromRelatedEntities(entity, fromNestedEntityConfig.getEntityRelation()) ) {
-					JSONEntityElastic relatedElasticEntity = createElasticEntity(fromNestedEntityConfig, nestedFromRelatedEntity);
-					elasticEntity.addRelatedEntity(fromNestedEntityConfig.getName(), relatedElasticEntity);
-				}
-			}
-
-			// get the to nested entities and create the related elastic entities
-			for (EntityIndexingConfig toNestedEntityConfig : entityIndexingConfig.getIndexToNestedEntities()) {
-
-				for ( Entity nestedToRelatedEntity : entityDataService.getToRelatedEntities(entity, toNestedEntityConfig.getEntityRelation()) ) {
-					JSONEntityElastic relatedElasticEntity = createElasticEntity(toNestedEntityConfig, nestedToRelatedEntity);
-					elasticEntity.addRelatedEntity(toNestedEntityConfig.getName(), relatedElasticEntity);
-				}
-			}
-
+			// Process nested "to" entities
+			processNestedEntities(entityIndexingConfig, entity, elasticEntity, false);
+	 
+			 
 			// index the entity
 			indexEntity(elasticEntity, entityIndexingConfig.getName());
 
@@ -320,6 +330,55 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		}
 
 	}
+
+	/**
+	 * Process the nested entities for the given entity
+	 * 
+	 * This method performs the following steps:
+	 * 1. Retrieves the nested entity configurations for the given entity indexing configuration.
+	 * 2. Throws an EntityIndexingException if there are no nested entity configurations.
+	 * 3. Retrieves the related nested entity IDs for the given entity and nested entity configuration.
+	 * 4. Throws an EntityIndexingException if there are no related nested entity IDs.
+	 * 5. Iterates over the related nested entity IDs and fetches the nested entity.
+	 * 6. Throws a warning if the nested entity is not found.
+	 * 7. Creates an Elasticsearch entity from the nested entity and the nested entity configuration.
+	 * 8. Adds the related nested entity to the elastic entity.
+	 * 
+	 * The parameter isFromRelation is used to determine whether the nested entities are from or to the given entity.
+	 * 
+	 * @param entityIndexingConfig
+	 * @param entity
+	 * @param elasticEntity
+	 * @param isFromRelation
+	 * @throws EntityIndexingException
+	 */
+	private void processNestedEntities(EntityIndexingConfig entityIndexingConfig, Entity entity, JSONEntityElastic elasticEntity, boolean isFromRelation) throws EntityIndexingException {
+		Collection<EntityIndexingConfig> nestedEntityConfigs = isFromRelation ? entityIndexingConfig.getIndexFromNestedEntities() : entityIndexingConfig.getIndexToNestedEntities();
+	
+		for (EntityIndexingConfig nestedEntityConfig : nestedEntityConfigs) {
+
+			Collection<UUID> nestedRelatedEntityIds;
+			try {
+				nestedRelatedEntityIds = isFromRelation ? entityDataService.getFromRelatedEntitiesIds(entity.getId(), nestedEntityConfig.getEntityRelation()) : entityDataService.getToRelatedEntitiesIds(entity.getId(), nestedEntityConfig.getEntityRelation());
+			} catch (EntitiyRelationXMLLoadingException e) {
+				throw new EntityIndexingException("Error getting related nested entities: " + e.getMessage());
+			}
+	
+			for (UUID nestedRelatedEntityId : nestedRelatedEntityIds) {
+				Optional<Entity> nestedEntity = entityDataService.getEntityById(nestedRelatedEntityId);
+	
+				if (nestedEntity.isEmpty()) {
+					logger.warn("Nested entity not found: " + nestedRelatedEntityId);
+					continue;
+				} else {
+					JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig, nestedEntity.get());
+					elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), relatedElasticEntity);
+				}
+			}
+		}
+	}
+
+	
 
 	/**
 	 * Create the elastic entity from the entity and the relations
@@ -532,39 +591,38 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 		try {
 
+			Collection<UUID> entityRelationsIds = new ArrayList<UUID>();
+			Boolean isEntity = true;
+
 			if (config.getSourceFromRelation() != null ) {// is a relation FROM indexing
 
 					if (config.getSourceMember() != null) { // is a related entity field
-
-						// get the related entities
-						for (Entity relatedEntity : entityDataService.getFromRelatedEntities(entity, config.getSourceFromRelation()) ) 
-							processFieldOccurrence(relatedEntity.getFieldOccurrences( config.getSourceField() ), config, ientity);
-
+						// get the related entities	
+						entityRelationsIds = entityDataService.getFromRelatedEntitiesIds(entity.getId(), config.getSourceFromRelation());
 					} else {// is a relation attribute
-
-						// get the relations
-						for (Relation relation : entityDataService.getFromRelations(entity, config.getSourceFromRelation())) 
-							processFieldOccurrence(relation.getFieldOccurrences( config.getSourceField() ), config, ientity);
+						entityRelationsIds = entityDataService.getFromRelationsIds(entity.getId(), config.getSourceFromRelation());	
+						isEntity = false;
 					}
 
 			} else if ( config.getSourceToRelation() != null ) {// is a TO relation indexing
 
 				if (config.getSourceMember() != null) { // is a related entity field
-
-					// get the related entities
-					for (Entity relatedEntity : entityDataService.getToRelatedEntities(entity, config.getSourceToRelation()) ) 
-						processFieldOccurrence(relatedEntity.getFieldOccurrences( config.getSourceField() ), config, ientity);
-
+					// get the related entities	
+					entityRelationsIds = entityDataService.getToRelatedEntitiesIds(entity.getId(), config.getSourceToRelation());
 				} else {// is a relation attribute
-
-					// get the relations
-					for (Relation relation : entityDataService.getToRelations(entity, config.getSourceToRelation())) 
-						processFieldOccurrence(relation.getFieldOccurrences( config.getSourceField() ), config, ientity);
+					entityRelationsIds = entityDataService.getToRelationsIds(entity.getId(), config.getSourceToRelation());
+					isEntity = false;
 				}
 
-			} else {// is a entity field so process the field occurrences
-				processFieldOccurrence(entity.getFieldOccurrences( config.getSourceField() ), config, ientity);
+			} else {// is a entity field so process we process the field occurrences of this entity only
+				entityRelationsIds.add(entity.getId());	
 			}
+
+			if ( entityRelationsIds.size() != 0 )
+				for (UUID relationOrEntityId : entityRelationsIds)  
+					processFieldOccurrences(relationOrEntityId, isEntity, config, ientity); // process the field occurrences
+
+
 		} catch (Exception e) {
 
 			throw new EntityIndexingException("Error processing field: " + config.getSourceField() + " subfield: "
@@ -573,9 +631,16 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		}
 	}
 
-	private void processFieldOccurrence(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config,
-			JSONEntityElastic ientity) {
+	private void processFieldOccurrences(UUID entityId, Boolean isEntity, FieldIndexingConfig config, JSONEntityElastic ientity) {
 		
+		// get the field occurrences for the entity and the field name (source field in config)
+		Collection<FieldOccurrence> occurrences = null;
+		if ( isEntity )
+			occurrences = entityDataService.getFieldEntityFieldOccurrences(entityId, config.getSourceField() );		
+		else
+			occurrences = entityDataService.getFieldRelationFieldOccurrences(entityId, config.getSourceField() );		
+		
+
 		// if field filter is defined and the services is available, apply it
 		if ( fieldOccurrenceFilterService != null && config.getFilter() != null ) {
 
@@ -603,6 +668,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 				else
 					value = occr.getValue();
 
+				// add the field occurrence to the json entity
 				ientity.addFieldOccurrence(config.getName(), value);
 
 //				if ( config.getSortable() ) 

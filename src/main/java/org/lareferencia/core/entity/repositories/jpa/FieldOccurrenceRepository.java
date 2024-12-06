@@ -20,12 +20,14 @@
 
 package org.lareferencia.core.entity.repositories.jpa;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
 
@@ -37,6 +39,13 @@ public interface FieldOccurrenceRepository extends JpaRepository<FieldOccurrence
 	//List<FieldOccurrence> findByFieldTypeIdAndContainerId(Long fieldTypeId, UUID containerId);
 	//List<FieldOccurrence> findByFieldTypeAndContainerId(FieldType fieldType, UUID containerId);
 	
-	//List<FieldOccurrence> findByContainerId(UUID containerId);
+	 //List<FieldOccurrence> findByContainerId(UUID containerId);
+
+	@Query(value = "select fo.* from field_occurrence fo, entity_fieldoccr ef, field_type ft where fo.id = ef.fieldoccr_id and ef.entity_id = ?1 and fo.field_type_id = ft.id and ft.name = ?2 ", nativeQuery = true)
+	Collection<FieldOccurrence> getEntityFieldOccurrencesByEntityIdAndFieldName(UUID entityId, String fieldName);
+
+	@Query(value = "select fo.* from field_occurrence fo, relation_fieldoccr rf, field_type ft where fo.id = rf.fieldoccr_id and rf.relation_id = ?1 and fo.field_type_id = ft.id and ft.name = ?2 ", nativeQuery = true)	
+	Collection<FieldOccurrence> getRelationFieldOccurrencesByRelationIdAndFieldName(UUID relationId, String fieldName);
+
 	
 }
