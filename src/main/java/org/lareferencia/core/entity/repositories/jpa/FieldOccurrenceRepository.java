@@ -45,5 +45,10 @@ public interface FieldOccurrenceRepository extends JpaRepository<FieldOccurrence
 	@Query(value = "select fo.* from field_occurrence fo, relation_fieldoccr rf, field_type ft where fo.id = rf.fieldoccr_id and rf.relation_id = ?1 and fo.field_type_id = ft.id and ft.name = ?2 ", nativeQuery = true)	
 	Set<FieldOccurrence> getRelationFieldOccurrencesByRelationIdAndFieldName(UUID relationId, String fieldName);
 
-	
+	@Query(value = "select fo.* from field_occurrence fo, entity_fieldoccr ef where fo.id = ef.fieldoccr_id and ef.entity_id = ?1", nativeQuery = true)
+	Set<FieldOccurrence> getEntityFieldOccurrencesByEntityId(UUID entityId);
+
+	@Query(value = "select fo.* from field_occurrence fo, relation_fieldoccr rf where fo.id = rf.fieldoccr_id and rf.relation_id = ?1 ", nativeQuery = true)	
+	Set<FieldOccurrence> getRelationFieldOccurrencesByRelationId(UUID relationId);
+
 }

@@ -99,17 +99,14 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	// Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
 
-	@Query("Select r.id from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Set<UUID> getFromRelations(UUID id, Long relationId);
+	@Query("Select r.id from Relation r where (r.id.toEntityId = ?1 or r.id.fromEntityId = ?1) and r.relationType.id = ?2")
+	Set<UUID> getRelationsWithThisEntityAsMember(UUID id, Long relationId);
    
-	@Query("Select r.id from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Set<UUID> getToRelations(UUID id, Long relationId);
-
 	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
-	Set<UUID> getToRelatedEntitiesIds(UUID id, Long relationId);
+	Set<UUID> getToEntitiesIdsWithThisEntityInFromMember(UUID id, Long relationId);
 
 	@Query("Select r.id.fromEntityId from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
-	Set<UUID> getFromRelatedEntitiesIds(UUID id, Long relationId);
+	Set<UUID> getFromEntitiesIdsWithThisEntityInToMember(UUID id, Long relationId);
 
 	
 	/*** Hidden in rest **/

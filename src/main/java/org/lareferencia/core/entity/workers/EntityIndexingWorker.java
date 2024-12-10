@@ -1,26 +1,9 @@
-/*
- *   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
- *
- *   This program is free software: you can redistribute it and/or modify
- *   it under the terms of the GNU Affero General Public License as published by
- *   the Free Software Foundation, either version 3 of the License, or
- *   (at your option) any later version.
- *
- *   This program is distributed in the hope that it will be useful,
- *   but WITHOUT ANY WARRANTY; without even the implied warranty of
- *   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- *   GNU Affero General Public License for more details.
- *
- *   You should have received a copy of the GNU Affero General Public License
- *   along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- *   This file is part of LA Referencia software platform LRHarvester v4.x
- *   For any further information please contact Lautaro Matas <lmatas@gmail.com>
- */
-
 package org.lareferencia.core.entity.workers;
 
 import java.text.NumberFormat;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -30,180 +13,182 @@ import org.lareferencia.core.entity.indexing.service.EntityIndexingService;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
 import org.lareferencia.core.entity.services.EntityDataService;
-import org.lareferencia.core.entity.services.EntityIndexingStats;
 import org.lareferencia.core.entity.services.EntityLoadingMonitorService;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.worker.BaseBatchWorker;
-import org.lareferencia.core.entity.workers.EntityIndexingRunningContext;
-import org.lareferencia.core.entity.workers.EntityPaginator;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import lombok.Getter;
 import lombok.Setter;
 
-
 public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexingRunningContext> {
 
-	private static Logger logger = LogManager.getLogger(EntityIndexingWorker.class);
-	
-	@Getter
-	@Setter
-	Boolean enableProfiling = true;
-		
-	@Autowired
-	EntityDataService erService;
-	
-	@Autowired 
-	EntityRepository entityRepository;
-	
-	@Autowired
-	EntityIndexingService indexingService;
-	
-	EntityPaginator entityPaginator;
-	
-	IEntityIndexer indexer;
+    private static Logger logger = LogManager.getLogger(EntityIndexingWorker.class);
 
-	private Profiler profiler;
-	
-	NumberFormat percentajeFormat = NumberFormat.getPercentInstance();
-	
-	boolean emptyPage = true;
+    @Getter
+    @Setter
+    Boolean enableProfiling = true;
 
-	@Autowired
-	EntityLoadingMonitorService entityMonitorService;
+    @Autowired
+    EntityDataService erService;
 
-	public EntityIndexingWorker() {
-		super();
-	}
+    @Autowired
+    EntityRepository entityRepository;
 
+    @Autowired
+    EntityIndexingService indexingService;
 
+    EntityPaginator entityPaginator;
 
-	@Override
-	public void preRun() {
-		
-		try { 
+    IEntityIndexer indexer;
 
-			if ( runningContext.getEntityType() != null ) {
+    private Profiler profiler;
 
-				if (runningContext.getProvenanceSource() != null ) {
-					logger.info("Getting entities of type: " + runningContext.getEntityType() + " and provenance source: " + runningContext.getProvenanceSource());
-					entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getProvenanceSource());
-				} else {
-					if (runningContext.getLastUdate() != null) {
-						logger.info("Getting entities of type: " + runningContext.getEntityType() + " and last update: " + runningContext.getLastUdate());
-						entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getLastUdate());
-					} else {
-						logger.info("Getting entities of type: " + runningContext.getEntityType());
-						entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
-					}
-				}
+    NumberFormat percentajeFormat = NumberFormat.getPercentInstance();
 
+    boolean emptyPage = true;
 
-			}
-			else {
+    @Autowired
+    EntityLoadingMonitorService entityMonitorService;
 
-				if ( runningContext.getLastUdate() != null  ) {
-					logger.info("Getting all entities from last update: " + runningContext.getLastUdate());
-					entityPaginator = new EntityPaginator(entityRepository, runningContext.getLastUdate());
-				} else {
-					logger.info("Getting all entities");
-					entityPaginator = new EntityPaginator(entityRepository);
-				}
-			}
+    private ExecutorService executorService;
 
-			// set page size
-			entityPaginator.setPageSize(runningContext.getPageSize());
-			entityPaginator.setActualPage(runningContext.getFromPage());
-			
-			this.setPaginator(entityPaginator);
-			logger.info("Total pages of size: " + entityPaginator.getPageSize()  +  " to index: " + entityPaginator.getTotalPages());
+    public EntityIndexingWorker() {
+        super();
+    }
 
-			indexer = indexingService.getIndexer(runningContext.getIndexingConfigFile(), runningContext.getIndexerBeanName());
-			
-		} catch (Exception e) {
-			logError("Error in Entity Indexing: " + runningContext.toString() + " :: " + e.getMessage());
-			error();
-		}
-	}
+    @Override
+    public void preRun() {
+        try {
+            if (runningContext.getEntityType() != null) {
+                if (runningContext.getProvenanceSource() != null) {
+                    logger.info("Getting entities of type: " + runningContext.getEntityType() + " and provenance source: " + runningContext.getProvenanceSource());
+                    entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getProvenanceSource());
+                } else {
+                    if (runningContext.getLastUdate() != null) {
+                        logger.info("Getting entities of type: " + runningContext.getEntityType() + " and last update: " + runningContext.getLastUdate());
+                        entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType(), runningContext.getLastUdate());
+                    } else {
+                        logger.info("Getting entities of type: " + runningContext.getEntityType());
+                        entityPaginator = new EntityPaginator(entityRepository, runningContext.getEntityType());
+                    }
+                }
+            } else {
+                if (runningContext.getLastUdate() != null) {
+                    logger.info("Getting all entities from last update: " + runningContext.getLastUdate());
+                    entityPaginator = new EntityPaginator(entityRepository, runningContext.getLastUdate());
+                } else {
+                    logger.info("Getting all entities");
+                    entityPaginator = new EntityPaginator(entityRepository);
+                }
+            }
 
+            // set page size
+            entityPaginator.setPageSize(runningContext.getPageSize());
+            entityPaginator.setActualPage(runningContext.getFromPage());
 
-	@Override
-	public void prePage() {
-		
-		profiler = new Profiler(enableProfiling, "").start();
-		emptyPage = true;
-		
-	}
+            this.setPaginator(entityPaginator);
+            logger.info("Total pages of size: " + entityPaginator.getPageSize() + " to index: " + entityPaginator.getTotalPages());
 
-	@Override
-	public void processItem(Entity entity) {
+            indexer = indexingService.getIndexer(runningContext.getIndexingConfigFile(), runningContext.getIndexerBeanName());
 
+            // Initialize the executor service with a fixed thread pool
+            executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
-		try {
+        } catch (Exception e) {
+            logError("Error in Entity Indexing: " + runningContext.toString() + " :: " + e.getMessage());
+            error();
+        }
+    }
 
-			// Delete or index depending
-			if (runningContext.getDeleteMode())
-				indexer.delete(entity.getId().toString());
-			else {
+    @Override
+    public void prePage() {
+        profiler = new Profiler(enableProfiling, "").start();
+        emptyPage = true;
+        // Initialize the executor service with a fixed thread pool
+        // executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
-				indexer.index(entity);
-				entityMonitorService.addEntitySentToIndex(entity.getId(), entity.getEntityTypeId());
+        int processToRun = runningContext.getProcessToRun();
 
-			}
+        if (processToRun == 0) {
+            processToRun = Runtime.getRuntime().availableProcessors();
+            System.out.println( "Setting threads to run to runtime available processors: " + processToRun);
+        }
 
-			emptyPage = false;
+        System.out.println( "Running with " + processToRun + " threads");
+        executorService = Executors.newFixedThreadPool(processToRun);
 
-		} catch (Exception e) {
+    }
 
-			entityMonitorService.reportEntityIndexingError(entity.getId(), e.getMessage());
-			String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
-			logError(msg);
-		}
+    @Override
+    @Transactional
+    public void processItem(Entity entity) {
 
+        executorService.submit(() -> {
+            try {
+                // Delete or index depending
+                if (runningContext.getDeleteMode())
+                    indexer.delete(entity.getId().toString());
+                else {
+                    indexer.index(entity);
+                    entityMonitorService.addEntitySentToIndex(entity.getId(), entity.getEntityTypeId());
+                }
+                emptyPage = false;
+            } catch (Exception e) {
+                entityMonitorService.reportEntityIndexingError(entity.getId(), e.getMessage());
+                String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
+                logError(msg);
+            }
+        });
+    }
 
-		
-	}
+    @Override
+    public void postPage() {
+        // Wait for all tasks to complete
+        executorService.shutdown();
+        try {
+            if (!executorService.awaitTermination(60, TimeUnit.MINUTES)) {
+                executorService.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            executorService.shutdownNow();
+        }
 
-	@Override
-	public void postPage() {
-		
-		// execute only if at least one entity was indexed
-		if (!emptyPage) {
-			try {
-				indexer.flush();
-			} catch (EntityIndexingException e) {
-				logError( "Error indexing page: " + this.getActualPage() + " ::" + e.getMessage() );
-			}
-		}
-		
-		profiler.messure("Page Indexing Time (ms): ", false);
-		profiler.report(logger);
-	}
+        // Execute only if at least one entity was indexed
+        if (!emptyPage) {
+            try {
+                indexer.flush();
+            } catch (EntityIndexingException e) {
+                logError("Error indexing page: " + this.getActualPage() + " ::" + e.getMessage());
+            }
+        }
 
-	@Override
-	public void postRun() {
-		logInfo("EntityRelationIndexing worker :: FINISHED :: " + runningContext.toString());	
-	}
-	
-	@Override
-	public String toString() {
-		return  "ERIndexer::" + "[" + percentajeFormat.format(this.getCompletionRate()) + "]"; 
-	}	
+        profiler.messure("Page Indexing Time (ms): ", false);
+        profiler.report(logger);
+    }
 
-	/******************* Auxiliares ********** */
-	
-	
-	
-	private void error() {
-		this.stop();
-	}
+    @Override
+    public void postRun() {
+        logInfo("EntityRelationIndexing worker :: FINISHED :: " + runningContext.toString());
+    }
 
-	private void logError(String message) {
-		logger.error(message);
-	}
+    @Override
+    public String toString() {
+        return "ERIndexer::" + "[" + percentajeFormat.format(this.getCompletionRate()) + "]";
+    }
 
-	private void logInfo(String message) {
-		logger.info(message);
-	}
+    /******************* Auxiliares ********** */
 
+    private void error() {
+        this.stop();
+    }
+
+    private void logError(String message) {
+        logger.error(message);
+    }
+
+    private void logInfo(String message) {
+        logger.info(message);
+    }
 }

@@ -26,12 +26,14 @@ import javax.persistence.PostPersist;
 import javax.persistence.Transient;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.springframework.data.domain.Persistable;
+
 
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.Setter;
 
-public abstract class CacheableEntityBase<T> implements ICacheableEntity<T> {
+public abstract class CacheableEntityBase<T>  implements ICacheableEntity<T>, Persistable<T> {
 
 	public CacheableEntityBase() {
 		_isNew = true;

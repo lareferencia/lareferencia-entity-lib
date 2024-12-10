@@ -1,4 +1,3 @@
-
 /*
  *   Copyright (c) 2013-2022. LA Referencia / Red CLARA and others
  *
@@ -19,13 +18,16 @@
  *   For any further information please contact Lautaro Matas <lmatas@gmail.com>
  */
 
-package org.lareferencia.core.entity.domain;
+package org.lareferencia.core.entity.repositories.jpa;
+
+import org.lareferencia.core.entity.domain.FieldType;
+import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
 
-public interface ICacheableEntity<I>  {
+
+@RepositoryRestResource(path = "field_type", collectionResourceRel = "field_type")
+public interface FieldTypeRepository extends NamedEntityJpaRepository<FieldType, Long> {
+
+
 	
-	I getId();
-	//Boolean isDirty();
-	void markAsStored();
-
 }

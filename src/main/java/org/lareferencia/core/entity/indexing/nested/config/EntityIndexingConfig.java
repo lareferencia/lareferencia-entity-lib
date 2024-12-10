@@ -67,15 +67,9 @@ public class EntityIndexingConfig {
 		}
 	}
 	
-	@XmlElementWrapper(name="index-from-nested-entities")
+	@XmlElementWrapper(name="index-nested-entities")
 	@XmlElement(name="indexed-entity")
-	public List<EntityIndexingConfig> getIndexFromNestedEntities() {
-		return indexNestedEntities;
-	}
-
-	@XmlElementWrapper(name="index-to-nested-entities")
-	@XmlElement(name="indexed-entity")
-	public List<EntityIndexingConfig> getIndexToNestedEntities() {
+	public List<EntityIndexingConfig> getIndexNestedEntities() {
 		return indexNestedEntities;
 	}
 	
@@ -96,27 +90,14 @@ public class EntityIndexingConfig {
 		return entityRelation;
 	}
 	
-	public Set<String> getFromRelationNames() {
+	public Set<String> getRelationNames() {
 			
 		Set<String> relationNames = new HashSet<String>();
 		
 		// collect names of relations used in indexing fields 
 		for (FieldIndexingConfig indexField : this.getIndexFields() ) {
-			if ( indexField.getSourceFromRelation() != null )
-				relationNames.add( indexField.getSourceFromRelation() );
-		}
-		
-		return relationNames;
-	}
-
-	public Set<String> getToRelationNames() {
-		
-		Set<String> relationNames = new HashSet<String>();
-		
-		// collect names of relations used in indexing fields 
-		for (FieldIndexingConfig indexField : this.getIndexFields() ) {
-			if ( indexField.getSourceToRelation() != null )
-				relationNames.add( indexField.getSourceToRelation() );
+			if ( indexField.getSourceRelation() != null )
+				relationNames.add( indexField.getSourceRelation() );
 		}
 		
 		return relationNames;

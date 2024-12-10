@@ -66,6 +66,10 @@ public class EntityIndexingRunningContext implements IRunningContext {
 	@Setter
 	int fromPage = 0;
 
+	@Getter
+	@Setter
+	int processToRun = 0;
+
 	public EntityIndexingRunningContext(String indexingConfigFile, String indexeBeanName) {
 		super();
 		this.indexingConfigFile = indexingConfigFile;

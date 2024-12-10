@@ -24,6 +24,7 @@ import java.util.Collection;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 import javax.persistence.CascadeType;
 import javax.persistence.FetchType;
@@ -42,14 +43,10 @@ import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Setter;
 
-
-//@Cacheable
-//@org.hibernate.annotations.Cache(usage = CacheConcurrencyStrategy.READ_ONLY)
-
 @Data
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @MappedSuperclass
-public abstract class FieldOccurrenceContainer  {
+public abstract class FieldOccurrenceContainer   {
 
 	
 //	/**
@@ -86,23 +83,25 @@ public abstract class FieldOccurrenceContainer  {
 	/**
 	 * Loads plain list of occurrences into a complex map structure
 	 */
-	private void loadOccurrencesIntoMultimap() {
+	public void loadOcurrences(Map<Long,String> fieldNamesById) {
 		
 		if ( occurrencessByFieldName == null ) {
 			occurrencessByFieldName = ArrayListMultimap.create();
 			for (FieldOccurrence occr : occurrences) 
-				occurrencessByFieldName.put(occr.getFieldName(), occr);
+				if (fieldNamesById != null) {
+					occurrencessByFieldName.put( fieldNamesById.get(occr.getFieldTypeId()), occr);
+				} else {
+					occurrencessByFieldName.put(occr.getFieldName(), occr);
+				}
 		}
 	}
 	
 	/**
 	 * Builds and returns occurrences by fieldname
-	 * ATENTION: this method will trigger the loading of all ocurrences into a map, should be avoided in massive tasks 
 	 * @return
 	 */
 	@JsonIgnore
 	public Collection<FieldOccurrence> getFieldOccurrences(String fieldName) {
-		loadOccurrencesIntoMultimap();
 		return this.occurrencessByFieldName.get(fieldName);
 	}
 	
@@ -113,9 +112,19 @@ public abstract class FieldOccurrenceContainer  {
 	 */
 	@JsonProperty("fields")
 	public Map<String, Collection<FieldOccurrence>> getOccurrencesAsMap() {
-		loadOccurrencesIntoMultimap();
+		loadOcurrences(null);
 		return occurrencessByFieldName.asMap();
-	
+	}
+
+	/**
+	 * Builds and returns all occurrences as a map of fieldname, occurrences
+	 * ATENTION: this method will trigger the loading of all ocurrences into a map, should be avoided in massive tasks 
+	 * param fieldNamesById a map of field id, field name
+	 * @return
+	 */
+	public Map<String, Collection<FieldOccurrence>> getOccurrencesAsMap(Map<Long,String> fieldNamesById) {
+		loadOcurrences(fieldNamesById);
+		return occurrencessByFieldName.asMap();
 	}
 
 	public void addFieldOccurrence(FieldOccurrence occr) throws EntityRelationException {
@@ -142,10 +151,8 @@ public abstract class FieldOccurrenceContainer  {
 	}
 	
 	public void removeAllFieldOccurrences() {
-		this.occurrences = new HashSet<FieldOccurrence>(); // blank occurrences in the duplicate
-		this.occurrencessByFieldName = null;
+		this.occurrences.clear(); // blank occurrences in the duplicate
+		this.occurrencessByFieldName = null; // blank the map
 	}
 
-	
-	
 }

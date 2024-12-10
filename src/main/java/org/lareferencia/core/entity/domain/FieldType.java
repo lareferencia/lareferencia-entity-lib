@@ -33,6 +33,7 @@ import javax.persistence.Id;
 import javax.persistence.JoinColumn;
 import javax.persistence.ManyToOne;
 import javax.persistence.Table;
+import javax.persistence.Transient;
 
 import org.lareferencia.core.util.ListAttributeConverter;
 
@@ -50,7 +51,7 @@ import lombok.Setter;
 @AllArgsConstructor
 @Table(name = "field_type")
 @javax.persistence.Entity
-public class FieldType implements Serializable {
+public class FieldType implements Serializable, ICacheableNamedEntity<Long> {
 	
 	static public enum Kind { SIMPLE, COMPLEX };
 
@@ -104,5 +105,13 @@ public class FieldType implements Serializable {
 	}
 	public void addSubfield(String fieldName) {
 		this.subfields.add(fieldName);
+	}
+
+	@Transient
+	private Boolean isStored = false;
+
+	@Override
+	public void markAsStored() {
+		isStored = true;
 	}
 }

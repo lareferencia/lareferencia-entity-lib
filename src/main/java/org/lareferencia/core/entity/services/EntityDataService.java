@@ -23,6 +23,7 @@ package org.lareferencia.core.entity.services;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -39,6 +40,7 @@ import javax.xml.bind.Unmarshaller;
 import lombok.AllArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.hibernate.Hibernate;
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityRelationType;
@@ -67,6 +69,7 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.hateoas.EntityModel;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
@@ -94,6 +97,9 @@ public class EntityDataService {
 	SourceRelationRepository sourceRelationRepository;
 
 	@Autowired
+	EntityModelCache entityModelCache;	
+
+	@Autowired
 	private DateHelper dateHelper;
 
 	@Autowired
@@ -113,9 +119,8 @@ public class EntityDataService {
 	@Setter
 	private Profiler profiler = new Profiler(false, "");
 
-	ConcurrentCachedNamedStore<Long, EntityType, EntityTypeRepository> entityTypeStore;
-	ConcurrentCachedNamedStore<Long, RelationType, RelationTypeRepository> relationTypeStore;
 	SemanticIdentifierCachedStore semanticIdentifierCachedStore;
+	ConcurrentCachedStore<UUID, Entity, EntityRepository> entityCachedStore;
 	ProvenanceStore provenanceStore;
 	FieldOcurrenceCachedStore fieldOcurrenceCachedStore;
 
@@ -125,9 +130,8 @@ public class EntityDataService {
 
 	@PostConstruct
 	private void postConstruct() {
-		entityTypeStore = new ConcurrentCachedNamedStore<>(entityTypeRepository, 500, true, 0);
-		relationTypeStore = new ConcurrentCachedNamedStore<>(relationTypeRepository, 500, true, 0);
-		
+
+		entityCachedStore = new ConcurrentCachedStore<UUID, Entity, EntityRepository>(entityRepository,1000,true,0);
 
 		semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository, 1000);
 		provenanceStore = new ProvenanceStore(provenanceRepository);
@@ -413,7 +417,8 @@ public class EntityDataService {
 
 	public EntityType getEntityTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 		try {
-			return entityTypeStore.getByName(name);
+			//return entityTypeStore.getByName(name);
+			return entityModelCache.getObjectByName(EntityType.class, name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
 			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeName for this model db :: "  + name + " does not exists in metamodel");
@@ -421,14 +426,20 @@ public class EntityDataService {
 	}
 
 	public Optional<Entity> getEntityById(UUID entityId) {
-
-		return entityRepository.findById(entityId);
+		
+		Entity entity = entityCachedStore.get(entityId);
+		if (entity == null) return Optional.empty();
+		
+		// Ensure the entity is fully loaded
+		Hibernate.initialize(entity);
+		
+		return Optional.of(entity);
 	}
 
 	public RelationType getRelationTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 
 		try {
-			return relationTypeStore.getByName(name);
+			return entityModelCache.getObjectByName(RelationType.class, name);
 		} catch (CacheException e) {
 			logger.error("Type: " + name + " does not exists in metamodel");
 			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeName for this model :: " + name + " does not exists in metamodel");
@@ -437,27 +448,28 @@ public class EntityDataService {
 
 	public EntityType getEntityTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
-		EntityType type = entityTypeStore.get(id);
-
-		if (type != null) {
-			return type;
-		} else {
+		EntityType type;
+		try {
+			type = entityModelCache.getObjectById(EntityType.class, id);
+		} catch (CacheException e) {
 			logger.error("Type: " + id + " does not exists in metamodel");
 			throw new EntitiyRelationXMLLoadingException("Unknown EntityTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
+
+		return type;
 	}
 
 	public RelationType getRelationTypeFromId(Long id) throws EntitiyRelationXMLLoadingException {
 
-		RelationType type = relationTypeStore.get(id);
-
-		// if exists in map return cached value
-		if (type != null)
-			return type;
-		else {
+		RelationType type;
+		try {
+			type = entityModelCache.getObjectById(RelationType.class, id);
+		} catch (CacheException e) {
 			logger.error("Type: " + id + " does not exists in metamodel");
 			throw new EntitiyRelationXMLLoadingException("Unknown RelationTypeId for this model db :: " + id + " does not exists in metamodel");
 		}
+
+		return type;
 	}
 
 	public EntityType getEntityTypeByEntityId(UUID entityId) throws EntitiyRelationXMLLoadingException {
@@ -517,24 +529,20 @@ public class EntityDataService {
 		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
 	}
 
-	public Set<UUID> getFromRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getRelationsIdsWithThisEntityAsMember(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getFromRelations(entityId, relationId);
+		
+		return entityRepository.getRelationsWithThisEntityAsMember(entityId, relationId);
+		
 	}
 
-	public Set<UUID> getFromRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<UUID> getMemberRelatedEntitiesIds(UUID entityId, String relationName, boolean isFromMember) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getFromRelatedEntitiesIds(entityId, relationId);
-	}
-
-	public Set<UUID> getToRelatedEntitiesIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
-		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getToRelatedEntitiesIds(entityId, relationId);
-	}
-
-	public Set<UUID> getToRelationsIds(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
-		Long relationId = getRelationTypeFromName(relationName).getId();
-		return entityRepository.getToRelations(entityId, relationId);
+		if (isFromMember) {
+			return entityRepository.getFromEntitiesIdsWithThisEntityInToMember(entityId, relationId);
+		} else {
+			return entityRepository.getToEntitiesIdsWithThisEntityInFromMember(entityId, relationId);
+		}
 	}
 
 	// get all field occurrences of an entity by field name
@@ -545,6 +553,33 @@ public class EntityDataService {
 	// get all field occurrences of a relation by field name
 	public Set<FieldOccurrence> getFieldRelationFieldOccurrences(UUID relationId, String fieldName) {
 		return fieldOccurrenceRepository.getRelationFieldOccurrencesByRelationIdAndFieldName(relationId, fieldName);
+	}
+
+	/**
+	 * Get all field occurrences of an entity by field name
+	 * @param entityId
+	 * @return
+	 */
+	public Map<String, Collection<FieldOccurrence>> getEntityFieldOccurrenceByFieldName(UUID entityId) {
+
+		Map<String, Collection<FieldOccurrence>> fieldOccurrenceMap = new HashMap<String, Collection<FieldOccurrence>>();
+
+		for (FieldOccurrence fieldOccurrence : fieldOccurrenceRepository.getEntityFieldOccurrencesByEntityId(entityId)) {
+			
+			try {
+				String fieldName = fieldOccurrence.getFieldType().getName();
+			
+				if (!fieldOccurrenceMap.containsKey(fieldName))
+					fieldOccurrenceMap.put(fieldName, new HashSet<FieldOccurrence>());
+
+				fieldOccurrenceMap.get(fieldName).add( fieldOccurrence);
+			} catch (Exception e) {
+				logger.error("Error getting field occurrence by field name :: " + e.getMessage());
+			}
+			
+		}
+
+		return fieldOccurrenceMap;
 	}
 
 //	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {

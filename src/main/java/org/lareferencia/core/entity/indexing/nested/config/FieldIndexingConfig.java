@@ -40,8 +40,7 @@ public class FieldIndexingConfig {
 	String type = DEFAULT_FIELD_TYPE;
 	String sourceField;
 	String sourceSubfield;
-	String sourceToRelation;
-	String sourceFromRelation;
+	String sourceRelation;
 	String sourceMember;
 	Boolean sortable = false;
 	
@@ -65,15 +64,11 @@ public class FieldIndexingConfig {
 		return sourceSubfield;
 	}
 	
-	@XmlAttribute(name="source-from-relation")
-	public String getSourceFromRelation() {
-		return sourceFromRelation;
+	@XmlAttribute(name="source-relation")
+	public String getSourceRelation() {
+		return sourceRelation;
 	}
 
-	@XmlAttribute(name="source-to-relation")
-	public String getSourceToRelation() {
-		return sourceToRelation;
-	}
 	
 	@XmlAttribute(name="source-member")
 	public String getSourceMember() {
