@@ -69,13 +69,13 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.hateoas.EntityModel;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
 
 import lombok.Getter;
 import lombok.Setter;
+import lombok.Synchronized;
 
 public class EntityDataService {
 
@@ -436,6 +436,10 @@ public class EntityDataService {
 		return Optional.of(entity);
 	}
 
+	public void addEntityToCache(Entity entity) {
+		entityCachedStore.put(entity.getId(), entity);
+	}
+
 	public RelationType getRelationTypeFromName(String name) throws EntitiyRelationXMLLoadingException {
 
 		try {
@@ -492,7 +496,7 @@ public class EntityDataService {
 			entityRepository.deleteById(entityId);
 	}
 
-	public FindOrCreateEntityResult findOrCreateFinalEntity(SourceEntity sourceEntity) {
+	public synchronized FindOrCreateEntityResult findOrCreateFinalEntity(SourceEntity sourceEntity) {
 
 		Collection<SemanticIdentifier> semanticIdentifiers = sourceEntity.getSemanticIdentifiers();
 		List<Long> semanticIds = semanticIdentifiers.stream().map(SemanticIdentifier::getId)

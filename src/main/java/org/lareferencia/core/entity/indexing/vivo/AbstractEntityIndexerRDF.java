@@ -41,6 +41,7 @@ import org.lareferencia.core.entity.indexing.vivo.config.RelationIndexingConfig;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
@@ -78,6 +79,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 	// will be injected by spring context on set config method
 	FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
+	@Transactional
 	@Override
 	public void index(Entity entity) throws EntityIndexingException {
 		

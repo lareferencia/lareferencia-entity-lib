@@ -5,6 +5,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.jena.sparql.function.library.print;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -138,6 +139,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
             } catch (Exception e) {
                 entityMonitorService.reportEntityIndexingError(entity.getId(), e.getMessage());
                 String msg = "Error indexing entity internal EntityTypeID: " + entity.getId() + " " + runningContext.toString() + " -- msg: " + e.getMessage();
+                e.printStackTrace();
                 logError(msg);
             }
         });

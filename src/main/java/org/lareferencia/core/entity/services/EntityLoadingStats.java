@@ -13,29 +13,53 @@ public class EntityLoadingStats {
     Long sourceRelationsLoaded = 0L;
     Long relationsCreated = 0L;
 
+    private int totalEntitiesLoaded;
+    private int totalLoadTime;
+
     public EntityLoadingStats() {
         super();
-
+        this.totalEntitiesLoaded = 0;
+        this.totalLoadTime = 0;
     }
 
-    void incrementSourceEntitiesLoaded() {
+    public synchronized void incrementSourceEntitiesLoaded() {
         this.sourceEntitiesLoaded++;
     }
 
-    void incrementEntitiesCreated() {
+    public synchronized void incrementEntitiesCreated() {
         this.entitiesCreated++;
     }
 
-    void incrementEntitiesDuplicated() {
+    public synchronized void incrementEntitiesDuplicated() {
         this.entitiesDuplicated++;
     }
 
-    void incrementSourceRelationsLoaded() {
+    public synchronized void incrementSourceRelationsLoaded() {
         this.sourceRelationsLoaded++;
     }
 
-    void incrementRelationsCreated() {
+    public synchronized void incrementRelationsCreated() {
         this.relationsCreated++;
+    }
+
+    public synchronized void incrementEntitiesLoaded() {
+        totalEntitiesLoaded++;
+    }
+
+    public synchronized void addLoadTime(int loadTime) {
+        totalLoadTime += loadTime;
+    }
+
+    public synchronized int getTotalEntitiesLoaded() {
+        return totalEntitiesLoaded;
+    }
+
+    public synchronized int getTotalLoadTime() {
+        return totalLoadTime;
+    }
+
+    public synchronized double getAverageLoadTime() {
+        return totalEntitiesLoaded == 0 ? 0 : (double) totalLoadTime / totalEntitiesLoaded;
     }
 
     public void add(EntityLoadingStats other) {

@@ -40,6 +40,7 @@ import org.lareferencia.core.entity.indexing.plain.config.IndexConfig;
 import org.lareferencia.core.entity.indexing.plain.config.IndexingConfiguration;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
@@ -82,6 +83,7 @@ public abstract class AbstractPlainEntityIndexer implements IEntityIndexer {
 	
 
 	@Override
+	@Transactional
 	public void index(Entity entity) throws EntityIndexingException {
 		
 		try {

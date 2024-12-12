@@ -85,7 +85,6 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	private static String ID_FIELD = "id";
 	private static String ID_FIELD_TYPE = "keyword";
 
-
 	private static Logger logger = LogManager.getLogger(JSONElasticEntityIndexerImpl.class);
 
 	private IndexingConfiguration indexingConfiguration;
@@ -301,6 +300,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 		try {
 
+			// add the entity to the cache
+			entityDataService.addEntityToCache(entity);
+
 			// get the entity type
 			EntityType type = entityModelCache.getObjectById(EntityType.class, entity.getEntityTypeId());
 			// get the entity indexing config for the entity type
@@ -347,6 +349,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 			indexEntity(elasticEntity, entityIndexingConfig.getName());
 
 		} catch (Exception e) {
+			e.printStackTrace();
 			throw new EntityIndexingException("Error indexing entity: " + entity.toString() + " Error was: " + e.getMessage());
 		}
 
@@ -590,8 +593,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 		} catch (Exception e) {
 
+			e.printStackTrace();
 			throw new EntityIndexingException("Error processing field: " + config.getSourceField() + " subfield: "
 					+ config.getSourceSubfield() + "::" + e.getMessage());
+			
 		
 		}
 	}
