@@ -26,7 +26,8 @@ import org.lareferencia.core.entity.domain.ICacheableEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.github.benmanes.caffeine.cache.RemovalCause;
+
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -69,7 +70,7 @@ public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends Jpa
         });
     }
 
-    @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW)
+    @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW,  isolation = Isolation.SERIALIZABLE)
     public synchronized void put(K key, C obj) {
 
         if ( cache.getIfPresent(key) == null ) {

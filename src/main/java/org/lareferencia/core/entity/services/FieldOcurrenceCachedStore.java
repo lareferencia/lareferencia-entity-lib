@@ -25,6 +25,9 @@ import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.repositories.jpa.FieldOccurrenceRepository;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 public class FieldOcurrenceCachedStore extends ConcurrentCachedStore<Long, FieldOccurrence, FieldOccurrenceRepository> {
 
@@ -32,37 +35,37 @@ public class FieldOcurrenceCachedStore extends ConcurrentCachedStore<Long, Field
         super(repository, capacity, false, 0);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)    
     public synchronized FieldOccurrence loadOrCreate(FieldType type, IFieldValueInstance field) throws EntityRelationException {
+        try {
+            FieldOccurrence createdFieldOccr = type.buildFieldOccurrence();
 
-        FieldOccurrence createdFieldOccr = type.buildFieldOccurrence();
-
-        if ( type.hasSubfields() ) { // Complex Value field
-
-            for ( IFieldValueInstance subfield :field.getFields() ) {
-                if ( subfield.getValue() != null && !subfield.getValue().trim().isEmpty() )
-                    createdFieldOccr.addValue(subfield.getName(), subfield.getValue());
+            if (type.hasSubfields()) { // Complex Value field
+                for (IFieldValueInstance subfield : field.getFields()) {
+                    if (subfield.getValue() != null && !subfield.getValue().trim().isEmpty())
+                        createdFieldOccr.addValue(subfield.getName(), subfield.getValue());
+                }
+            } else { // Single Value Field
+                String fieldValue = (field.getValue() != null) ? field.getValue() : ""; // it can have an empty value
+                createdFieldOccr.addValue(fieldValue, field.getLang());
             }
 
-        } else { // Single Value Field
-            String fieldValue = ( field.getValue() != null ) ? field.getValue() : ""; // it can have an empty value
-            createdFieldOccr.addValue(fieldValue, field.getLang());
+            // if is a preferred value, set it
+            if (field.getPreferred())
+                createdFieldOccr.setPreferred(field.getPreferred());
+
+            // update the id
+            createdFieldOccr.updateId();
+
+            FieldOccurrence existingFieldOccr = this.get(createdFieldOccr.getId());
+            if (existingFieldOccr == null) {
+                this.put(createdFieldOccr.getId(), createdFieldOccr);
+                return createdFieldOccr;
+            } else {
+                return existingFieldOccr;
+            }
+        } catch (Exception e) {
+            throw new EntityRelationException("Error during transaction", e);
         }
-
-        // if is a preferred value, set it
-        if ( field.getPreferred() )
-            createdFieldOccr.setPreferred(field.getPreferred());
-
-        // update the id
-        createdFieldOccr.updateId();
-
-        FieldOccurrence existingFieldOccr = this.get( createdFieldOccr.getId() );
-        if ( existingFieldOccr == null ) {
-            this.put(createdFieldOccr.getId(), createdFieldOccr);
-            return createdFieldOccr;
-        }
-        else
-            return existingFieldOccr;
     }
-
-
 }

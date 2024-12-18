@@ -9,9 +9,10 @@ import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.domain.ICacheableNamedEntity;
 import org.lareferencia.core.entity.domain.RelationType;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 
 import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
@@ -43,26 +44,43 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
 
     
+    @Autowired
+    private PlatformTransactionManager transactionManager;
+
     @Override
-    @Transactional
     public void onApplicationEvent(ContextRefreshedEvent event) {
 
-        // Initialize the maps
-        byNameMapsByClass= new HashMap<String, Map<String, ? extends ICacheableNamedEntity<Long>>>();
-        byIdMapsByClass = new HashMap<String, Map<Long, ? extends ICacheableNamedEntity<Long>>>();
-        namesByIdMapsByClass = new HashMap<String, Map<Long,String>>();
+        try {
+            // Initialize the maps
+            byNameMapsByClass = new HashMap<String, Map<String, ? extends ICacheableNamedEntity<Long>>>();
+            byIdMapsByClass = new HashMap<String, Map<Long, ? extends ICacheableNamedEntity<Long>>>();
+            namesByIdMapsByClass = new HashMap<String, Map<Long, String>>();
 
-        // Populate the maps
-        populateMaps( RelationType.class, relationTypeRepository );
-        populateMaps( EntityType.class, entityTypeRepository );
-        populateMaps( FieldType.class, fieldTypeRepository );
+            // Manually begin transaction
+          TransactionStatus transactionStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
 
-        populateIsFromRelationMap();
+            try {
+                // Populate the maps
+                populateMaps(RelationType.class, relationTypeRepository);
+                populateMaps(EntityType.class, entityTypeRepository);
+                populateMaps(FieldType.class, fieldTypeRepository);
 
+                populateIsFromRelationMap();
 
+                // Commit transaction
+                transactionManager.commit(transactionStatus);
+            } catch (Exception e) {
+                // Rollback transaction in case of error
+                transactionManager.rollback(transactionStatus);
+                throw e;
+            }
+        } catch (Exception e) {
+            System.out.println("Error in EntityModelCache Loading. If the database is not already available, please reload the environment after setup. " + e.getMessage());
+        }
     }
-	@PreDestroy
-	public void preDestroy() {
+
+    @PreDestroy
+    public void preDestroy() {
         // Clean up
         for (Map<String, ? extends ICacheableNamedEntity<Long>> map : byNameMapsByClass.values()) {
             map.clear();

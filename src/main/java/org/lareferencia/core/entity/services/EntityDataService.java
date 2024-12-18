@@ -69,13 +69,14 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.w3c.dom.Document;
 
 import lombok.Getter;
 import lombok.Setter;
-import lombok.Synchronized;
 
 public class EntityDataService {
 
@@ -110,10 +111,6 @@ public class EntityDataService {
 
 	@Autowired
 	private SemanticIdentifierRepository semanticIdentifierRepository;
-
-	// @Setter
-	// @Getter
-	// private EntityLRUCache entityCache = null;
 
 	@Getter
 	@Setter
@@ -154,7 +151,7 @@ public class EntityDataService {
 	 * @param dryRun if true, no data will be persisted
 	 * @throws Exception
 	 */
-	@Transactional(propagation = Propagation.REQUIRED)
+	@Transactional(propagation = Propagation.REQUIRED, isolation = Isolation.READ_COMMITTED)
 	public EntityLoadingStats parseAndPersistEntityRelationDataFromXMLDocument(Document document, Boolean dryRun) throws Exception {
 		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
 		profiler.messure("EntityXML Parse");
@@ -202,7 +199,7 @@ public class EntityDataService {
 	 * @param data
 	 * @throws EntitiyRelationXMLLoadingException
 	 */
-	@Transactional(propagation = Propagation.REQUIRES_NEW)
+	@Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
 	public EntityLoadingStats persistEntityRelationData(XMLEntityRelationData data, Boolean dryRun) throws Exception {
 
 		EntityLoadingStats stats = new EntityLoadingStats();
@@ -300,7 +297,7 @@ public class EntityDataService {
 			// save the source entity
 			profiler.messure("Persist Source Entity");
 			if (!dryRun) // if not dry run, save source entity
-				sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
+				sourceEntityRepository.save(sourceEntity); // save source entity
 
 			stats.incrementSourceEntitiesLoaded(); // increment stats
 
