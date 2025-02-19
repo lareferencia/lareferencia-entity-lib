@@ -49,6 +49,8 @@ import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldOccurrenceContainer;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.domain.Provenance;
+import org.lareferencia.core.entity.domain.Relation;
+import org.lareferencia.core.entity.domain.RelationId;
 import org.lareferencia.core.entity.domain.RelationType;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.domain.SourceEntity;
@@ -57,6 +59,7 @@ import org.lareferencia.core.entity.repositories.jpa.EntityRepository;
 import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.FieldOccurrenceRepository;
 import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.lareferencia.core.entity.repositories.jpa.RelationRepository;
 import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.SemanticIdentifierRepository;
 import org.lareferencia.core.entity.repositories.jpa.SourceEntityRepository;
@@ -89,6 +92,9 @@ public class EntityDataService {
 	RelationTypeRepository relationTypeRepository;
 
 	@Autowired
+	RelationRepository relationRepository;
+
+	@Autowired
 	SourceEntityRepository sourceEntityRepository;
 
 	@Autowired
@@ -112,6 +118,9 @@ public class EntityDataService {
 	@Autowired
 	private SemanticIdentifierRepository semanticIdentifierRepository;
 
+	@Autowired
+	private PlatformTransactionManager transactionManager;
+
 	@Getter
 	@Setter
 	private Profiler profiler = new Profiler(false, "");
@@ -132,7 +141,7 @@ public class EntityDataService {
 
 		semanticIdentifierCachedStore = new SemanticIdentifierCachedStore(semanticIdentifierRepository, 1000);
 		provenanceStore = new ProvenanceStore(provenanceRepository);
-		fieldOcurrenceCachedStore = new FieldOcurrenceCachedStore(fieldOccurrenceRepository, 1000);
+		fieldOcurrenceCachedStore = new FieldOcurrenceCachedStore(fieldOccurrenceRepository, 1000, transactionManager);
 	}
 
 	@PreDestroy
@@ -151,7 +160,7 @@ public class EntityDataService {
 	 * @param dryRun if true, no data will be persisted
 	 * @throws Exception
 	 */
-	@Transactional(propagation = Propagation.REQUIRED, isolation = Isolation.READ_COMMITTED)
+	@Transactional(propagation = Propagation.REQUIRED)
 	public EntityLoadingStats parseAndPersistEntityRelationDataFromXMLDocument(Document document, Boolean dryRun) throws Exception {
 		XMLEntityRelationData erData = parseEntityRelationDataFromXmlDocument(document);
 		profiler.messure("EntityXML Parse");
@@ -165,6 +174,7 @@ public class EntityDataService {
 	 * @return
 	 * @throws EntitiyRelationXMLLoadingException
 	 */
+	@Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_UNCOMMITTED)
 	public XMLEntityRelationData parseEntityRelationDataFromXmlDocument(Document document) throws Exception {
 
 		XMLEntityRelationData erData = new XMLEntityRelationData();
@@ -199,7 +209,7 @@ public class EntityDataService {
 	 * @param data
 	 * @throws EntitiyRelationXMLLoadingException
 	 */
-	@Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_COMMITTED)
+	@Transactional(propagation = Propagation.REQUIRES_NEW, isolation = Isolation.READ_UNCOMMITTED)
 	public EntityLoadingStats persistEntityRelationData(XMLEntityRelationData data, Boolean dryRun) throws Exception {
 
 		EntityLoadingStats stats = new EntityLoadingStats();
@@ -297,7 +307,7 @@ public class EntityDataService {
 			// save the source entity
 			profiler.messure("Persist Source Entity");
 			if (!dryRun) // if not dry run, save source entity
-				sourceEntityRepository.save(sourceEntity); // save source entity
+				sourceEntityRepository.saveAndFlush(sourceEntity); // save source entity
 
 			stats.incrementSourceEntitiesLoaded(); // increment stats
 
@@ -530,10 +540,17 @@ public class EntityDataService {
 		return entityRepository.findByProvenanceSourceAndRecordId(sourceId, recordId);
 	}
 
-	public Set<UUID> getRelationsIdsWithThisEntityAsMember(UUID entityId, String relationName) throws EntitiyRelationXMLLoadingException {
+	public Set<RelationId> getRelationsIdsWithThisEntityAsMember(UUID entityId, String relationName, Boolean isFromMember) throws EntitiyRelationXMLLoadingException {
 		Long relationId = getRelationTypeFromName(relationName).getId();
 		
-		return entityRepository.getRelationsWithThisEntityAsMember(entityId, relationId);
+		return entityRepository.findRelationsIdsByTypeAndEntityAndMembership(relationId, entityId, isFromMember);
+		
+	}
+
+	public Set<Relation> getRelationsWithThisEntityAsMember(UUID entityId, String relationName, Boolean isFromMember) throws EntitiyRelationXMLLoadingException {
+		Long relationId = getRelationTypeFromName(relationName).getId();
+		
+		return entityRepository.findRelationsByTypeAndEntityAndMembership(relationId, entityId, isFromMember);
 		
 	}
 
@@ -581,6 +598,10 @@ public class EntityDataService {
 		}
 
 		return fieldOccurrenceMap;
+	}
+
+	public Optional<Relation> getRelationById(RelationId relationId) {
+		return relationRepository.findById(relationId);
 	}
 
 //	public Page<Entity> findEntitiesByProvenanceSource(String sourceId, Pageable pageable) {

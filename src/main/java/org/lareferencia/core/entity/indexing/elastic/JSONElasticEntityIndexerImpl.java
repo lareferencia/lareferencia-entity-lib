@@ -45,6 +45,8 @@ import org.lareferencia.core.entity.domain.EntityRelationException;
 import org.lareferencia.core.entity.domain.EntityType;
 import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldType;
+import org.lareferencia.core.entity.domain.Relation;
+import org.lareferencia.core.entity.domain.RelationId;
 import org.lareferencia.core.entity.domain.SemanticIdentifier;
 import org.lareferencia.core.entity.indexing.filters.FieldOccurrenceFilterService;
 import org.lareferencia.core.entity.indexing.nested.config.EntityIndexingConfig;
@@ -567,28 +569,34 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 		try {
 
-			Collection<UUID> entityRelationsIds = new ArrayList<UUID>();
-			Boolean isEntity = true;
-
 			if (config.getSourceRelation() != null ) {// is a relation indexing
 
 				if (config.getSourceMember() != null) { // is a related entity field
 
 					// check if the relation is from or to the entity and get the related entities ids
 					Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(), config.getSourceMember());
-					entityRelationsIds = entityDataService.getMemberRelatedEntitiesIds(entity.getId(), config.getSourceRelation(), isFromMember);
+					for (UUID relatedEntityId : entityDataService.getMemberRelatedEntitiesIds(entity.getId(), config.getSourceRelation(), isFromMember) ) {
+
+						Entity relatedEntity = entityDataService.getEntityById(relatedEntityId).get();
+						relatedEntity.loadOcurrences( entityModelCache.getNamesByIdMap(FieldType.class) );
+						processFieldOccurrences( relatedEntity.getFieldOccurrences(config.getSourceField()) , config, ientity); // process the field occurrences
+					} 
 
 				} else {// is a relation attribute
-					entityRelationsIds = entityDataService.getRelationsIdsWithThisEntityAsMember(entity.getId(), config.getSourceRelation());
+
+					EntityType entityType = entityDataService.getEntityTypeFromId(entity.getEntityTypeId());
+					Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(), entityType.getName());
+
+					for (Relation relation : entityDataService.getRelationsWithThisEntityAsMember(entity.getId(), config.getSourceRelation(), isFromMember)) {
+						relation.loadOcurrences( entityModelCache.getNamesByIdMap(FieldType.class) );
+						processFieldOccurrences( relation.getFieldOccurrences(config.getSourceField()) , config, ientity);
+					}
 				}
 
 			} else {// is a entity field so process we process the field occurrences of this entity only
-				entityRelationsIds.add(entity.getId());	
+				entity.loadOcurrences( entityModelCache.getNamesByIdMap(FieldType.class) );
+				processFieldOccurrences( entity.getFieldOccurrences(config.getSourceField()) , config, ientity);
 			}
-
-			if ( entityRelationsIds.size() != 0 )
-				for (UUID relationOrEntityId : entityRelationsIds)  
-					processFieldOccurrences(relationOrEntityId, isEntity, config, ientity); // process the field occurrences
 
 
 		} catch (Exception e) {
@@ -601,19 +609,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		}
 	}
 
-	private void processFieldOccurrences(UUID entityRelationId, Boolean isEntity, FieldIndexingConfig config, JSONEntityElastic ientity) {
+	private void processFieldOccurrences(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config, JSONEntityElastic ientity) {
 		
-		// get the field occurrences for the entity and the field name (source field in config)
-		Collection<FieldOccurrence> occurrences = null;
-		if ( isEntity ) {
-			Entity entity = entityDataService.getEntityById(entityRelationId).get();
-			entity.loadOcurrences( entityModelCache.getNamesByIdMap(FieldType.class) );
-			occurrences = entity.getFieldOccurrences(config.getSourceField());
-			//occurrences = entityDataService.getFieldEntityFieldOccurrences(entityRelationId, config.getSourceField());
-		} else {
-			occurrences = entityDataService.getFieldRelationFieldOccurrences(entityRelationId, config.getSourceField());
-		}
-
+		
 		// if there are no occurrences, return
 		if (occurrences == null || occurrences.size() == 0)
 			return;	

@@ -119,6 +119,15 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
     }
 
     public boolean isFromRelation(String relationName, String entityTypeName) {
+        
+        if (!isFromRelationMap.containsKey(relationName)) {
+            throw new IllegalArgumentException("Relation name not found: " + relationName);
+        }
+
+        if (!isFromRelationMap.get(relationName).containsKey(entityTypeName)) {
+            throw new IllegalArgumentException("Entity type name not found: " + entityTypeName + " in relation: " + relationName);
+        }
+
         return isFromRelationMap.get(relationName).get(entityTypeName);
     }
 

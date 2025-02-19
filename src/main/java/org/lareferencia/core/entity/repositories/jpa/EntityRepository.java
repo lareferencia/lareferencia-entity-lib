@@ -32,6 +32,7 @@ import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
 import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.Relation;
+import org.lareferencia.core.entity.domain.RelationId;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -99,8 +100,27 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	// Page<Entity> findRelatedToEntitesByRelationTypeName(UUID entityId, String relationTypeName, Pageable pageable);
 
 
-	@Query("Select r.id from Relation r where (r.id.toEntityId = ?1 or r.id.fromEntityId = ?1) and r.relationType.id = ?2")
-	Set<UUID> getRelationsWithThisEntityAsMember(UUID id, Long relationId);
+	// @Query("Select r.id from Relation r where (r.id.toEntityId = ?1 or r.id.fromEntityId = ?1) and r.id.relationTypeId = ?2")
+	// Set<RelationId> getRelationsIdsWithThisEntityAsMember(UUID id, Long relationId);
+
+	// @Query("Select r from Relation r where (r.id.toEntityId = ?1 or r.id.fromEntityId = ?1) and r.relationType.id = ?2")
+	// Set<Relation> getRelationsWithThisEntityAsMember(UUID id, Long relationId);
+
+	@Query("SELECT r FROM Relation r WHERE r.relationType.id = :relationTypeId AND " +
+       "(CASE WHEN :isFromMember = true THEN r.id.fromEntityId ELSE r.id.toEntityId END) = :entityId")
+	Set<Relation> findRelationsByTypeAndEntityAndMembership(
+		@Param("relationTypeId") Long relationTypeId,
+		@Param("entityId") UUID entityId,
+		@Param("isFromMember") boolean isFromMember
+	);
+
+	@Query("SELECT r.id FROM Relation r WHERE r.relationType.id = :relationTypeId AND " +
+	"(CASE WHEN :isFromMember = true THEN r.id.fromEntityId ELSE r.id.toEntityId END) = :entityId")
+ 	Set<RelationId> findRelationsIdsByTypeAndEntityAndMembership(
+	 @Param("relationTypeId") Long relationTypeId,
+	 @Param("entityId") UUID entityId,
+	 @Param("isFromMember") boolean isFromMember
+ );
    
 	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
 	Set<UUID> getToEntitiesIdsWithThisEntityInFromMember(UUID id, Long relationId);

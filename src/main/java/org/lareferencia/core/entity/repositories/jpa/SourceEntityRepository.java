@@ -24,7 +24,6 @@ package org.lareferencia.core.entity.repositories.jpa;
 import java.util.Set;
 import java.util.UUID;
 
-import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.SourceEntity;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
