@@ -98,7 +98,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		
 		try {	
 			setTDBModel();
-			modelSize = m.size();
+			modelSize = model.size();
 		}
 		finally { 
 			dataset.end(); 
@@ -116,7 +116,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		try {	
 			setTDBModel();
 		
-			QueryExecution qe = QueryExecutionFactory.create(query, m);
+			QueryExecution qe = QueryExecutionFactory.create(query, model);
 			ResultSet resultSet = qe.execSelect();
 
 			while (resultSet.hasNext()) {
@@ -150,7 +150,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 			
 			try {			
 				setTDBModel();
-				m.remove(modelPage);
+				model.remove(modelPage);
 				dataset.commit();
 				
 				offset = PAGE_SIZE * page++;		
@@ -174,7 +174,7 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 			
 			// Write RDF file
 			OutputStream writer = new FileOutputStream(outputFilePath);
-			m.write(writer, format);
+			model.write(writer, format);
 			writer.close();
 		}
 		catch (IOException e){

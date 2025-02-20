@@ -62,7 +62,7 @@ public class EntityIndexerVivoImpl extends AbstractEntityIndexerRDF implements I
 				graph = endpoint.getGraph();
 				
 				// Use in-memory RDF model
-				m = ModelFactory.createDefaultModel();
+				model = ModelFactory.createDefaultModel();
 				persist = false;
 			
 			} catch (Exception e) {
@@ -76,21 +76,21 @@ public class EntityIndexerVivoImpl extends AbstractEntityIndexerRDF implements I
 	
 	private void flushModel() {
 		
-		m.removeAll();
-		m.close();
+		model.removeAll();
+		model.close();
 	}
 	
 	private String getModelContent () {
 	
 		StringWriter content = new StringWriter();
-		m.write(content, "N3");
+		model.write(content, "N3");
 
 		return content.toString();
 	}
 	
 	private long getModelSize () {
 		
-		return m.size();
+		return model.size();
 	}
 	
 	private int sendUpdate (String update) {

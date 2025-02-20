@@ -1,7 +1,5 @@
 package org.lareferencia.core.entity.indexing.vivo;
 
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Multimap;
 import org.apache.jena.query.Dataset;
 import org.apache.jena.query.ReadWrite;
 import org.apache.jena.rdf.model.*;
@@ -28,6 +26,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.io.StringWriter;
 import java.util.*;
 
 public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
@@ -57,7 +56,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
     
     protected boolean persist;
     protected Dataset dataset;
-    protected Model m;
+    protected Model model;
 
     @Autowired
     ApplicationContext context;
@@ -109,18 +108,22 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 
             String entityId = entity.getId().toString();
 
-            // Cargar las ocurrencias de la entidad
-            entity.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
-
             // Map attributes
             List<AttributeIndexingConfig> sourceAttributes = entityIndexingConfig.getSourceAttributes();
-            processAttributeList(sourceAttributes, entity);
+
+            // if there are no attributes to index, then we skip the entity atrributes and occurences
+            if (sourceAttributes != null && !sourceAttributes.isEmpty()) {
+                entity.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
+                processAttributeList(sourceAttributes, entity);
+            }
 
             for (RelationIndexingConfig relationConfig : entityIndexingConfig.getSourceRelations()) {
+
                 String relationName = relationConfig.getName();
                 Boolean isFromMember = entityModelCache.isFromRelation(relationName, entityTypeName);
 
                 for (Relation relation : entityDataService.getRelationsWithThisEntityAsMember(entity.getId(), relationName, isFromMember)) {
+
                     String relationId = relation.getId().toString();
                     Entity relatedEntity = relation.getRelatedEntity(entity.getId());
                     String relatedEntityId = relatedEntity.getId().toString();
@@ -132,7 +135,10 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
 
                     // Relation fields
                     List<AttributeIndexingConfig> relSourceAttributes = relationConfig.getSourceAttributes();
-                    processRelationAttributeList(relSourceAttributes, relation);
+                    if ( relSourceAttributes != null && !relSourceAttributes.isEmpty() ) {
+                        processRelationAttributeList(relSourceAttributes, relation);
+                    }
+
                 }
             }
 
@@ -143,6 +149,7 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
             if (persist) {
                 commitAndCloseTransaction();
             }
+            
         }
     }
 
@@ -186,10 +193,10 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
     public void setTDBModel() {
 
         if (graph == null || graph.isEmpty()) { // Check for null as well
-            m = dataset.getDefaultModel();
+            model = dataset.getDefaultModel();
         }
         else {
-            m = dataset.getNamedModel(graph);
+            model = dataset.getNamedModel(graph);
         }
     }
 
@@ -411,8 +418,8 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
         }
         else {
             // Write the triple to the in-memory RDF model
-            if (m.isClosed()) {
-                m = ModelFactory.createDefaultModel();
+            if (model.isClosed()) {
+                model = ModelFactory.createDefaultModel();
             }
             assembleRDFTriple(subjectValue, subjectType, predicateValue, predicateType, objectValue, objectType);
         }
@@ -427,28 +434,39 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
         RDFNode object;
 
         //Create subject
-        subject = m.createResource(subjectValue);
-        m.add(subject, RDF.type, m.createResource(subjectType));
+        subject = model.createResource(subjectValue);
+        model.add(subject, RDF.type, model.createResource(subjectType));
 
         //Create predicate
-        predicate = m.createProperty(predicateValue);
+        predicate = model.createProperty(predicateValue);
 
         //Create object
         if (predicateType.equals(OBJECT_PROPERTY)) { //resource object
-            object = m.createResource(objectValue);
-            m.add(object.asResource(), RDF.type, m.createResource(objectType));
+            object = model.createResource(objectValue);
+            model.add(object.asResource(), RDF.type, model.createResource(objectType));
         }
         else { //literal object
             if (objectType == null) { //untyped literal
-                object = m.createLiteral(objectValue);
+                object = model.createLiteral(objectValue);
             }
             else {
-                object = m.createTypedLiteral(objectValue, objectType);
+                object = model.createTypedLiteral(objectValue, objectType);
             }
         }
 
         //Create triple
-        m.add(subject, predicate, object);
+        model.add(subject, predicate, object);
+
+        if (logger.isDebugEnabled()) {
+            Model tempModel = ModelFactory.createDefaultModel();
+            Statement stmt = tempModel.createStatement(subject, predicate, object);
+            tempModel.add(stmt);
+
+            StringWriter out = new StringWriter();
+            tempModel.write(out, "TURTLE"); // Serializar a Turtle
+            logger.debug("Tripleta: " + out.toString());
+            tempModel.close();
+        }
     }
 
 }
