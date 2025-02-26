@@ -255,7 +255,10 @@ public abstract class AbstractEntityIndexerRDF implements IEntityIndexer {
             sourceEntityId = relationId;
         } else if (TARGET_ENTITY.equals(idSource)) {
             sourceEntityId = relatedEntityId;
-        } else if (idSource != null) { //  idSource is not null, and it's not NEW_ENTITY, RELATION, or TARGET_ENTITY
+        } else if (NEW_ENTITY.equals(idSource)) {
+            sourceEntityId = alternativeId;
+        }
+        else {
             sourceEntityId = entityId;
         }
 
