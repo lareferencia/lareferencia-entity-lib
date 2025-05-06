@@ -58,7 +58,7 @@ public interface SourceEntityRepository extends JpaRepository<SourceEntity, UUID
 	
 	Set<SourceEntity> findByProvenanceId(Long id);	
 	
-	@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier s, source_entity_semantic_identifier e" + 
+	@Query(value="SELECT se.* FROM source_entity se, source_entity_semantic_identifier s, source_entity_semantic_identifier e " + 
 				 "WHERE s.entity_id = ?1 AND s.semantic_id = e.semantic_id AND e.entity_id != ?1 AND se.uuid = e.entity_id;", nativeQuery=true)
 	Set<SourceEntity> findSourceEntitiesWithSharedSemanticIdentifiers(UUID sourceEntityId);
 

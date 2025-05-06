@@ -22,6 +22,7 @@ package org.lareferencia.core.entity.repositories.jpa;
 
 import java.util.UUID;
 
+import org.lareferencia.core.entity.domain.RelationId;
 import org.lareferencia.core.entity.domain.SourceRelation;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.rest.core.annotation.RepositoryRestResource;
@@ -29,7 +30,7 @@ import org.springframework.data.rest.core.annotation.RepositoryRestResource;
 
 //@RepositoryRestResource(path = "relation", collectionResourceRel = "relation")
 @RepositoryRestResource(exported = false)
-public interface SourceRelationRepository extends JpaRepository<SourceRelation, UUID> {
+public interface SourceRelationRepository extends JpaRepository<SourceRelation, RelationId> {
 	
 	
 //	Optional<Relation> findByRelationTypeAndToEntityAndFromEntity(RelationType rtype, Entity fromEntity, Entity toEntity);	
