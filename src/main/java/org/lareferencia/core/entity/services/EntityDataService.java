@@ -533,7 +533,8 @@ public class EntityDataService {
 
 	@Transactional
 	public synchronized void mergeEntityRelationData() {
-		entityRepository.mergeEntiyRelationData();
+		//entityRepository.mergeEntiyRelationData();
+		// TODO: delete this method
 	}
 
 	public List<Entity> findEntitiesByProvenanceSourceAndRecordId(String sourceId, String recordId) {
