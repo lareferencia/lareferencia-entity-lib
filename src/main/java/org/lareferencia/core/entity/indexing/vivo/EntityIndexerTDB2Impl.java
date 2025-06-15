@@ -83,7 +83,6 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     
     protected Dataset dataset;
     protected Model model; // Este es el modelo principal para la indexación
-    protected Model newTriplesModel; // Modelo temporal para las tripletas nuevas
     protected String graph; // Named graph URI
     protected boolean transactionActive = false; // Flag para controlar el estado de la transacción
     protected boolean hasTriplestore = false; // Flag para indicar si hay configuración de triplestore
@@ -148,10 +147,6 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                 model.setNsPrefixes(this.namespaces);
                 logger.info("No triplestore configured. Using in-memory model for RDF generation.");
             }
-            
-            // Inicializar modelo para tripletas nuevas
-            newTriplesModel = ModelFactory.createDefaultModel();
-            newTriplesModel.setNsPrefixes(this.namespaces);
             
             // Inicializar el mapa de archivos XML
             xmlFilesInitialized = new HashMap<>();
@@ -302,24 +297,22 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
             }
             
             // Export a archivos de tipo "file" si están configurados
-            if (newTriplesModel.size() > 0) {
+            Model modelToExport = model;
+            
+            if (modelToExport.size() > 0) {
                 List<OutputConfig> outputs = indexingConfig.getOutputs();
                 List<OutputConfig> files = getOutputsByType(outputs, "file");
                 
                 if (!files.isEmpty()) {
                     for (OutputConfig file : files) {
                         String filePath = file.getPath() + file.getName();
-                        writeNewTriplesToFile(filePath, file.getFormat());
+                        writeTriplesToFile(filePath, file.getFormat(), modelToExport);
                     }
                 } else {
                     logger.debug("No file outputs configured for export.");
                 }
                 
-                // Clear the new triples model after export
-                newTriplesModel.removeAll();
-                
-                // Si no hay triplestore, también limpiar el modelo principal
-                if (!hasTriplestore) {
+                if (!hasTriplestore) { // Limpiar el modelo principal si no hay triplestore
                     model.removeAll();
                 }
             } else {
@@ -334,23 +327,23 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
         }
     }
     
-    private void writeNewTriplesToFile(String outputFilePath, String format) throws EntityIndexingException {
+    private void writeTriplesToFile(String outputFilePath, String format, Model modelToWrite) throws EntityIndexingException {
         try {
             if ("RDF/XML".equalsIgnoreCase(format) || "XML".equalsIgnoreCase(format)) {
-                writeXMLTriplesToFile(outputFilePath, format);
+                writeXMLTriplesToFile(outputFilePath, format, modelToWrite);
             } else {
                 // Para otros formatos, usar append normal
                 try (FileOutputStream writer = new FileOutputStream(outputFilePath, true)) {
-                    newTriplesModel.write(writer, format);
-                    logger.info("New RDF triples (" + newTriplesModel.size() + ") exported to: " + outputFilePath + " in format: " + format);
+                    modelToWrite.write(writer, format);
+                    logger.info("RDF triples (" + modelToWrite.size() + ") exported to: " + outputFilePath + " in format: " + format);
                 }
             }
         } catch (Exception e) {
-            throw new EntityIndexingException("Error writing new triples to file: " + outputFilePath + " :: " + e.getMessage());
+            throw new EntityIndexingException("Error writing triples to file: " + outputFilePath + " :: " + e.getMessage());
         }
     }
     
-    private void writeXMLTriplesToFile(String outputFilePath, String format) throws EntityIndexingException {
+    private void writeXMLTriplesToFile(String outputFilePath, String format, Model modelToWrite) throws EntityIndexingException {
         try {
             boolean isFirstWrite = !xmlFilesInitialized.getOrDefault(outputFilePath, false);
             
@@ -360,7 +353,7 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                     // Crear un modelo temporal con namespaces para generar XML completo
                     Model tempModel = ModelFactory.createDefaultModel();
                     tempModel.setNsPrefixes(this.namespaces);
-                    tempModel.add(newTriplesModel);
+                    tempModel.add(modelToWrite);
                     
                     // Escribir el XML completo pero lo vamos a modificar para dejarlo abierto
                     java.io.StringWriter stringWriter = new java.io.StringWriter();
@@ -374,14 +367,14 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                     tempModel.close();
                     
                     xmlFilesInitialized.put(outputFilePath, true);
-                    logger.info("XML file initialized with " + newTriplesModel.size() + " triples: " + outputFilePath);
+                    logger.info("XML file initialized with " + modelToWrite.size() + " triples: " + outputFilePath);
                 }
             } else {
                 // Escrituras subsiguientes: agregar solo las tripletas sin encabezados
                 try (FileOutputStream writer = new FileOutputStream(outputFilePath, true)) {
                     // Crear modelo temporal solo con las nuevas tripletas
                     Model tempModel = ModelFactory.createDefaultModel();
-                    tempModel.add(newTriplesModel);
+                    tempModel.add(modelToWrite);
                     
                     // Generar XML y extraer solo el contenido de las tripletas
                     java.io.StringWriter stringWriter = new java.io.StringWriter();
@@ -396,7 +389,7 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                     }
                     
                     tempModel.close();
-                    logger.info("Added " + newTriplesModel.size() + " triples to existing XML file: " + outputFilePath);
+                    logger.info("Added " + modelToWrite.size() + " triples to existing XML file: " + outputFilePath);
                 }
             }
         } catch (Exception e) {
@@ -722,7 +715,8 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     private void assembleRDFTriple(String subjectUri, String subjectTypeUri,
                                    String predicateUri, String predicateType, 
                                    String objectValue, String objectTypeUri) { 
-        if (this.model == null) {
+        // Solo verificar el modelo principal si hay triplestore
+        if (hasTriplestore && this.model == null) {
             logger.error("Model is not initialized. Cannot add triple.");
             throw new IllegalStateException("RDF Model not initialized. Call setConfig first.");
         }
@@ -733,6 +727,7 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
              throw new IllegalStateException("Cannot add triple: Not in a transaction.");
         }
 
+        // Usar solo el modelo principal para agregar triples
         Resource subject = model.createResource(subjectUri);
         if (subjectTypeUri != null && !subjectTypeUri.trim().isEmpty()) { 
              model.add(subject, RDF.type, model.createResource(subjectTypeUri));
@@ -756,31 +751,6 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
 
         Statement stmt = model.createStatement(subject, predicate, object);
         model.add(stmt);
-        
-        // Also add to new triples model for export
-        Statement newStmt = newTriplesModel.createStatement(
-            newTriplesModel.createResource(subjectUri), 
-            newTriplesModel.createProperty(predicateUri), 
-            object instanceof Resource ? 
-                newTriplesModel.createResource(objectValue) : 
-                (objectTypeUri != null && !objectTypeUri.trim().isEmpty() ? 
-                    newTriplesModel.createTypedLiteral(objectValue, objectTypeUri) :
-                    newTriplesModel.createLiteral(objectValue))
-        );
-        newTriplesModel.add(newStmt);
-        
-        // Add type statements to new triples model too
-        if (subjectTypeUri != null && !subjectTypeUri.trim().isEmpty()) {
-            newTriplesModel.add(newTriplesModel.createResource(subjectUri), 
-                               RDF.type, 
-                               newTriplesModel.createResource(subjectTypeUri));
-        }
-        
-        if (OBJECT_PROPERTY.equals(predicateType) && objectTypeUri != null && !objectTypeUri.trim().isEmpty()) {
-            newTriplesModel.add(newTriplesModel.createResource(objectValue), 
-                               RDF.type, 
-                               newTriplesModel.createResource(objectTypeUri));
-        }
 
         if (logger.isDebugEnabled()) {
             StringWriter out = new StringWriter();
