@@ -53,7 +53,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
     @Autowired
     EntityLoadingMonitorService entityMonitorService;
 
-    private ExecutorService executorService;
+    //private ExecutorService executorService;
 
     public EntityIndexingWorker() {
         super();
@@ -95,7 +95,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
             indexer = indexingService.getIndexer(runningContext.getIndexingConfigFile(), runningContext.getIndexerBeanName());
 
             // Initialize the executor service with a fixed thread pool
-            executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+            //executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
         } catch (Exception e) {
             logError("Error in Entity Indexing: " + runningContext.toString() + " :: " + e.getMessage());
@@ -110,15 +110,15 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
         // Initialize the executor service with a fixed thread pool
         // executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
-        int processToRun = runningContext.getProcessToRun();
+        //int processToRun = runningContext.getProcessToRun();
 
-        if (processToRun == 0) {
-            processToRun = Runtime.getRuntime().availableProcessors();
-            System.out.println( "Setting threads to run to runtime available processors: " + processToRun);
-        }
+        //if (processToRun == 0) {
+        //    processToRun = Runtime.getRuntime().availableProcessors();
+        //    System.out.println( "Setting threads to run to runtime available processors: " + processToRun);
+        //}
 
-        System.out.println( "Running with " + processToRun + " threads");
-        executorService = Executors.newFixedThreadPool(processToRun);
+        // System.out.println( "Running with " + processToRun + " threads");
+        //executorService = Executors.newFixedThreadPool(processToRun);
 
     }
 
@@ -126,7 +126,7 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
     @Transactional
     public void processItem(Entity entity) {
 
-        executorService.submit(() -> {
+        //executorService.submit(() -> {
             try {
                 // Delete or index depending
                 if (runningContext.getDeleteMode())
@@ -142,20 +142,20 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
                 e.printStackTrace();
                 logError(msg);
             }
-        });
+        //});
     }
 
     @Override
     public void postPage() {
         // Wait for all tasks to complete
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(60, TimeUnit.MINUTES)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            executorService.shutdownNow();
-        }
+        // executorService.shutdown();
+        // try {
+        //     if (!executorService.awaitTermination(60, TimeUnit.MINUTES)) {
+        //         executorService.shutdownNow();
+        //     }
+        // } catch (InterruptedException e) {
+        //     executorService.shutdownNow();
+        // }
 
         // Execute only if at least one entity was indexed
         if (!emptyPage) {
