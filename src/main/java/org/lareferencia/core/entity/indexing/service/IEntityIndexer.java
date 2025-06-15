@@ -31,6 +31,5 @@ public interface IEntityIndexer {
 	public void delete(String entityId) throws EntityIndexingException;
 	public void deleteAll(Collection<String> idList) throws EntityIndexingException;
 	public void flush() throws EntityIndexingException;
-	
-
+	public void prePage() throws EntityIndexingException;
 }

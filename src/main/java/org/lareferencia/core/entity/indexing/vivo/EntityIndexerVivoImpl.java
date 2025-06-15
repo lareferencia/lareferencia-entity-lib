@@ -8,6 +8,7 @@ import java.net.URLEncoder;
 import java.util.HashMap;
 
 import org.apache.jena.rdf.model.ModelFactory;
+import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.indexing.vivo.config.EntityIndexingConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.IndexingConfiguration;
@@ -137,6 +138,12 @@ public class EntityIndexerVivoImpl extends AbstractEntityIndexerRDF implements I
 		else {
 			logger.info("Page successfully transferred to target destination. " + getModelSize() + " triples sent.");
 		}
+	}
+
+	@Override
+	public void prePage() throws EntityIndexingException {
+		// TODO Auto-generated method stub
+		throw new UnsupportedOperationException("Unimplemented method 'prepage'");
 	}
 
 }

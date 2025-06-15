@@ -666,4 +666,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 		// TODO Auto-generated method stub
 
 	}
+
+
+	@Override
+	public void prePage() throws EntityIndexingException {
+		// TODO Auto-generated method stub
+	}
 }

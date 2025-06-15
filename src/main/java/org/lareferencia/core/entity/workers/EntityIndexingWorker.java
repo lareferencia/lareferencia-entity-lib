@@ -1,11 +1,7 @@
 package org.lareferencia.core.entity.workers;
 
 import java.text.NumberFormat;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 
-import org.apache.jena.sparql.function.library.print;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -107,19 +103,15 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
     public void prePage() {
         profiler = new Profiler(enableProfiling, "").start();
         emptyPage = true;
-        // Initialize the executor service with a fixed thread pool
-        // executorService = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+        
+        try {
+            indexer.prePage();
+        } catch (EntityIndexingException e) {
+            logError("Error in indexer prePage: " + e.getMessage());
+        }
 
-        //int processToRun = runningContext.getProcessToRun();
-
-        //if (processToRun == 0) {
-        //    processToRun = Runtime.getRuntime().availableProcessors();
-        //    System.out.println( "Setting threads to run to runtime available processors: " + processToRun);
-        //}
-
-        // System.out.println( "Running with " + processToRun + " threads");
-        //executorService = Executors.newFixedThreadPool(processToRun);
-
+        // Log the start of the page processing
+        logInfo("Processing page: " + this.getActualPage() + " of type: " + runningContext.getEntityType() + " with size: " + entityPaginator.getPageSize());
     }
 
     @Override
@@ -193,4 +185,6 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
     private void logInfo(String message) {
         logger.info(message);
     }
+
+   
 }

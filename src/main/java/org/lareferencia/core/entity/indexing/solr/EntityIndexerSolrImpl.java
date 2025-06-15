@@ -27,6 +27,7 @@ import java.util.List;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.indexing.service.AbstractPlainEntityIndexer;
+import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntity;
 import org.lareferencia.core.entity.repositories.solr.EntitySolrRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -61,6 +62,11 @@ public class EntityIndexerSolrImpl extends AbstractPlainEntityIndexer  {
 	public void flush() {
 		entitySolrRepository.saveAll( entityBuffer);
 		entityBuffer = new LinkedList<EntitySolr>(); 
+	}
+
+	@Override
+	public void prePage() throws EntityIndexingException {
+		// TODO Auto-generated method stub
 	}
 
 

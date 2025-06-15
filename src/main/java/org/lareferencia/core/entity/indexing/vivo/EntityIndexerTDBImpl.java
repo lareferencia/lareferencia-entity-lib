@@ -18,6 +18,7 @@ import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.StmtIterator;
 import org.apache.jena.tdb.TDBFactory;
+import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.indexing.vivo.config.EntityIndexingConfig;
 import org.lareferencia.core.entity.indexing.vivo.config.IndexingConfiguration;
@@ -183,6 +184,11 @@ public class EntityIndexerTDBImpl extends AbstractEntityIndexerRDF implements IE
 		finally { 
 			dataset.end(); 
 		}
+	}
+
+	@Override
+	public void prePage() throws EntityIndexingException {
+		
 	}
 
 }
