@@ -229,8 +229,8 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     @Transactional 
     @Override
     public void index(Entity entity) throws EntityIndexingException {
-        // Ya no maneja transacciones aquí, asume que ya hay una activa
-        if (!transactionActive) {
+        // Solo verificar transacción activa si hay triplestore configurado
+        if (hasTriplestore && !transactionActive) {
             throw new EntityIndexingException("No active transaction. Call prePage() first.");
         }
         
