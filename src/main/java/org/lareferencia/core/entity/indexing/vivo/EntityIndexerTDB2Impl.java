@@ -265,7 +265,11 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     @Override
     public void flush() throws EntityIndexingException {
         logger.info("Flushing data to TDB2 store.");
-        commitAndEndTransaction();
+        // Solo hacer commit sin cerrar la conexión
+        if (dataset != null && dataset.isInTransaction()) {
+            dataset.commit();
+            dataset.end();
+        }
     }
 
     @Override
