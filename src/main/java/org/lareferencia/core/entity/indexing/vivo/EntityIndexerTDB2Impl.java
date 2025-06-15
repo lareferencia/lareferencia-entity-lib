@@ -86,6 +86,8 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     protected Model newTriplesModel; // Modelo temporal para las tripletas nuevas
     protected String graph; // Named graph URI
     protected boolean transactionActive = false; // Flag para controlar el estado de la transacción
+    protected boolean hasTriplestore = false; // Flag para indicar si hay configuración de triplestore
+    protected Map<String, Boolean> xmlFilesInitialized = new HashMap<>(); // Para rastrear archivos XML inicializados
 
     public EntityIndexerTDB2Impl() {
         // Constructor
@@ -111,40 +113,48 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
 
             loadOccurFilters();
 
+            // Buscar configuración de triplestore (opcional)
             List<OutputConfig> tdbOutputs = getOutputsByType(outputs, "triplestore");
-            if (tdbOutputs.isEmpty()) {
-                throw new EntityIndexingException("No triplestore output configured for TDB2Indexer.");
-            }
-            
-            // Buscar específicamente la configuración de triplestore
             OutputConfig tdbConfig = null;
-            for (OutputConfig output : tdbOutputs) {
-                if ("triplestore".equalsIgnoreCase(output.getType())) {
-                    tdbConfig = output;
-                    break;
+            
+            if (!tdbOutputs.isEmpty()) {
+                for (OutputConfig output : tdbOutputs) {
+                    if ("triplestore".equalsIgnoreCase(output.getType())) {
+                        tdbConfig = output;
+                        break;
+                    }
                 }
             }
             
-            if (tdbConfig == null) {
-                throw new EntityIndexingException("No valid triplestore configuration found in outputs.");
-            }
-            
-            this.graph = tdbConfig.getGraph();
-            String directory = tdbConfig.getPath();
-            boolean reset = Boolean.parseBoolean(tdbConfig.getReset());
+            if (tdbConfig != null) {
+                // Configurar triplestore
+                hasTriplestore = true;
+                this.graph = tdbConfig.getGraph();
+                String directory = tdbConfig.getPath();
+                boolean reset = Boolean.parseBoolean(tdbConfig.getReset());
 
-            dataset = TDBFactory.createDataset(directory);
-            logger.info("Using TDB2 triplestore at " + directory + (this.graph != null && !this.graph.isEmpty() ? " with graph <" + this.graph + ">" : " with default graph"));
+                dataset = TDBFactory.createDataset(directory);
+                logger.info("Using TDB2 triplestore at " + directory + (this.graph != null && !this.graph.isEmpty() ? " with graph <" + this.graph + ">" : " with default graph"));
 
-            if (reset) {
-                clearTDBStore();
+                if (reset) {
+                    clearTDBStore();
+                }
+                
+                setModelFromDataset(); // Inicializa this.model para operaciones de indexación
+            } else {
+                // No hay triplestore, usar modelo en memoria
+                hasTriplestore = false;
+                model = ModelFactory.createDefaultModel();
+                model.setNsPrefixes(this.namespaces);
+                logger.info("No triplestore configured. Using in-memory model for RDF generation.");
             }
-            
-            setModelFromDataset(); // Inicializa this.model para operaciones de indexación
             
             // Inicializar modelo para tripletas nuevas
             newTriplesModel = ModelFactory.createDefaultModel();
             newTriplesModel.setNsPrefixes(this.namespaces);
+            
+            // Inicializar el mapa de archivos XML
+            xmlFilesInitialized = new HashMap<>();
 
         } catch (Exception e) {
             logger.error("Error setting RDF Mapping Config File: " + configFilePath + ". " + e.getMessage(), e);
@@ -211,7 +221,9 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
 
     @Override
     public void prePage() throws EntityIndexingException {
-        beginTransaction();
+        if (hasTriplestore) {
+            beginTransaction();
+        }
     }
     
     @Transactional 
@@ -281,15 +293,15 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
 
     @Override
     public void flush() throws EntityIndexingException {
-        logger.info("Flushing data to TDB2 store.");
+        logger.info("Flushing data to configured outputs.");
         
         try {
-            // SIEMPRE hacer commit al TDB (triplestore)
-            if (transactionActive && dataset != null && dataset.isInTransaction()) {
+            // Solo hacer commit al TDB si hay triplestore configurado
+            if (hasTriplestore && transactionActive && dataset != null && dataset.isInTransaction()) {
                 commitAndEndTransaction();
             }
             
-            // Export SOLO a archivos de tipo "file" si están configurados
+            // Export a archivos de tipo "file" si están configurados
             if (newTriplesModel.size() > 0) {
                 List<OutputConfig> outputs = indexingConfig.getOutputs();
                 List<OutputConfig> files = getOutputsByType(outputs, "file");
@@ -305,12 +317,17 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                 
                 // Clear the new triples model after export
                 newTriplesModel.removeAll();
+                
+                // Si no hay triplestore, también limpiar el modelo principal
+                if (!hasTriplestore) {
+                    model.removeAll();
+                }
             } else {
                 logger.debug("No new triples to export to files.");
             }
         } catch (Exception e) {
-            // En caso de error, abortar la transacción
-            if (transactionActive) {
+            // En caso de error, abortar la transacción solo si hay triplestore
+            if (hasTriplestore && transactionActive) {
                 abortAndEndTransaction();
             }
             throw new EntityIndexingException("Error during flush: " + e.getMessage());
@@ -318,11 +335,107 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
     }
     
     private void writeNewTriplesToFile(String outputFilePath, String format) throws EntityIndexingException {
-        try (FileOutputStream writer = new FileOutputStream(outputFilePath, true)) { // Append mode
-            newTriplesModel.write(writer, format);
-            logger.info("New RDF triples (" + newTriplesModel.size() + ") exported to: " + outputFilePath + " in format: " + format);
+        try {
+            if ("RDF/XML".equalsIgnoreCase(format) || "XML".equalsIgnoreCase(format)) {
+                writeXMLTriplesToFile(outputFilePath, format);
+            } else {
+                // Para otros formatos, usar append normal
+                try (FileOutputStream writer = new FileOutputStream(outputFilePath, true)) {
+                    newTriplesModel.write(writer, format);
+                    logger.info("New RDF triples (" + newTriplesModel.size() + ") exported to: " + outputFilePath + " in format: " + format);
+                }
+            }
         } catch (Exception e) {
             throw new EntityIndexingException("Error writing new triples to file: " + outputFilePath + " :: " + e.getMessage());
+        }
+    }
+    
+    private void writeXMLTriplesToFile(String outputFilePath, String format) throws EntityIndexingException {
+        try {
+            boolean isFirstWrite = !xmlFilesInitialized.getOrDefault(outputFilePath, false);
+            
+            if (isFirstWrite) {
+                // Primera escritura: crear archivo con encabezado XML y las tripletas
+                try (FileOutputStream writer = new FileOutputStream(outputFilePath, false)) {
+                    // Crear un modelo temporal con namespaces para generar XML completo
+                    Model tempModel = ModelFactory.createDefaultModel();
+                    tempModel.setNsPrefixes(this.namespaces);
+                    tempModel.add(newTriplesModel);
+                    
+                    // Escribir el XML completo pero lo vamos a modificar para dejarlo abierto
+                    java.io.StringWriter stringWriter = new java.io.StringWriter();
+                    tempModel.write(stringWriter, format);
+                    String xmlContent = stringWriter.toString();
+                    
+                    // Remover la etiqueta de cierre para dejar el XML abierto
+                    String openXml = xmlContent.replaceAll("</rdf:RDF>\\s*$", "");
+                    
+                    writer.write(openXml.getBytes("UTF-8"));
+                    tempModel.close();
+                    
+                    xmlFilesInitialized.put(outputFilePath, true);
+                    logger.info("XML file initialized with " + newTriplesModel.size() + " triples: " + outputFilePath);
+                }
+            } else {
+                // Escrituras subsiguientes: agregar solo las tripletas sin encabezados
+                try (FileOutputStream writer = new FileOutputStream(outputFilePath, true)) {
+                    // Crear modelo temporal solo con las nuevas tripletas
+                    Model tempModel = ModelFactory.createDefaultModel();
+                    tempModel.add(newTriplesModel);
+                    
+                    // Generar XML y extraer solo el contenido de las tripletas
+                    java.io.StringWriter stringWriter = new java.io.StringWriter();
+                    tempModel.write(stringWriter, format);
+                    String xmlContent = stringWriter.toString();
+                    
+                    // Extraer solo el contenido entre las etiquetas rdf:RDF
+                    String bodyContent = extractXMLBody(xmlContent);
+                    
+                    if (!bodyContent.trim().isEmpty()) {
+                        writer.write(bodyContent.getBytes("UTF-8"));
+                    }
+                    
+                    tempModel.close();
+                    logger.info("Added " + newTriplesModel.size() + " triples to existing XML file: " + outputFilePath);
+                }
+            }
+        } catch (Exception e) {
+            throw new EntityIndexingException("Error writing XML triples to file: " + outputFilePath + " :: " + e.getMessage());
+        }
+    }
+    
+    private String extractXMLBody(String xmlContent) {
+        // Buscar el contenido entre <rdf:RDF...> y </rdf:RDF>
+        int startIndex = xmlContent.indexOf('>');
+        int endIndex = xmlContent.lastIndexOf("</rdf:RDF>");
+        
+        if (startIndex != -1 && endIndex != -1 && startIndex < endIndex) {
+            return xmlContent.substring(startIndex + 1, endIndex).trim();
+        }
+        
+        return "";
+    }
+    
+    private void finalizeXMLFiles() {
+        // Cerrar todos los archivos XML abiertos
+        List<OutputConfig> outputs = indexingConfig.getOutputs();
+        List<OutputConfig> files = getOutputsByType(outputs, "file");
+        
+        for (OutputConfig file : files) {
+            String format = file.getFormat();
+            if (("RDF/XML".equalsIgnoreCase(format) || "XML".equalsIgnoreCase(format)) && 
+                xmlFilesInitialized.getOrDefault(file.getPath() + file.getName(), false)) {
+                
+                try {
+                    String filePath = file.getPath() + file.getName();
+                    try (FileOutputStream writer = new FileOutputStream(filePath, true)) {
+                        writer.write("\n</rdf:RDF>".getBytes("UTF-8"));
+                        logger.info("Finalized XML file: " + filePath);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error finalizing XML file: " + file.getPath() + file.getName() + " :: " + e.getMessage());
+                }
+            }
         }
     }
 
@@ -611,13 +724,14 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
                                    String objectValue, String objectTypeUri) { 
         if (this.model == null) {
             logger.error("Model is not initialized. Cannot add triple.");
-            throw new IllegalStateException("RDF Model not initialized. Call setConfig and ensure transaction is active.");
+            throw new IllegalStateException("RDF Model not initialized. Call setConfig first.");
         }
-        if (!transactionActive || !dataset.isInTransaction()) {
+        
+        // Solo verificar transacción si hay triplestore
+        if (hasTriplestore && (!transactionActive || !dataset.isInTransaction())) {
              logger.error("Attempting to add triple outside of a transaction. Subject: " + subjectUri);
              throw new IllegalStateException("Cannot add triple: Not in a transaction.");
         }
-
 
         Resource subject = model.createResource(subjectUri);
         if (subjectTypeUri != null && !subjectTypeUri.trim().isEmpty()) { 
@@ -670,8 +784,8 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
 
         if (logger.isDebugEnabled()) {
             StringWriter out = new StringWriter();
-            Model tempModel = ModelFactory.createDefaultModel(); // Use a temporary model for logging one statement
-            tempModel.setNsPrefixes(this.namespaces); // For nicer Turtle output
+            Model tempModel = ModelFactory.createDefaultModel();
+            tempModel.setNsPrefixes(this.namespaces);
             tempModel.add(stmt);
             tempModel.write(out, "TURTLE");
             logger.debug("Added Triple: " + out.toString().trim());
@@ -684,18 +798,22 @@ public class EntityIndexerTDB2Impl implements IEntityIndexer, Closeable {
         logger.info("Closing EntityIndexerTDB2Impl.");
         try {
             // Solo hacer flush si hay datos pendientes
-            if (dataset != null && dataset.isInTransaction()) {
+            if (hasTriplestore && dataset != null && dataset.isInTransaction()) {
                 flush(); 
             }
+            
+            // Finalizar archivos XML
+            finalizeXMLFiles();
+            
         } catch (EntityIndexingException e) {
             logger.error("Error flushing data during close: " + e.getMessage(), e);
         } finally {
-            if (dataset != null) {
+            if (hasTriplestore && dataset != null) {
                 if (dataset.isInTransaction()) { 
                     logger.warn("Transaction was still active during close. Attempting to end.");
-                    dataset.end(); // Ensure any lingering transaction is ended.
+                    dataset.end();
                 }
-                dataset.close(); // AQUÍ es donde se cierra la base de datos
+                dataset.close();
                 logger.info("TDB2 Dataset closed.");
             }
         }
