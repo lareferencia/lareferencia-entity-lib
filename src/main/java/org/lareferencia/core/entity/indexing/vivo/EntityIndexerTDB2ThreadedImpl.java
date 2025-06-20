@@ -117,10 +117,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     protected String graph;
     protected boolean hasTriplestore = false;
 
-    // Modelo compartido para mantener identidad de recursos y mejorar deduplicación
-    private Model sharedResourceModel;
-    private final Object sharedModelLock = new Object();
-
     // --- NEW THREADING COMPONENTS ---
     // Marker objects for queue control
     private static final Object POISON_PILL = new Object();
@@ -226,9 +222,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
 
             // Inicializar threading
             initializeThreading();
-            
-            // Inicializar modelo compartido para recursos
-            initializeSharedResourceModel();
 
         } catch (Exception e) {
             logger.error("Error setting RDF Mapping Config File: " + configFilePath + ". " + e.getMessage(), e);
@@ -241,11 +234,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
         this.utilityExecutor = Executors.newSingleThreadExecutor(); // For monitoring
         
-        // Reducir concurrencia cuando se usa TDB2 para evitar problemas de corrupción
-        if (hasTriplestore) {
-            this.maxConcurrentTasks = Math.max(2, indexingThreads); // Más conservador para TDB2
-            logger.info("Using conservative threading settings for TDB2: max {} concurrent tasks", maxConcurrentTasks);
-        }
         
         // Inicializar semáforo para limitar tareas concurrentes
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
@@ -312,14 +300,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                                 stats.getTriplesWritten(),
                                 tdbStats.toString()
                         );
-                        
-                        // Log shared model statistics without cleanup
-                        synchronized (sharedModelLock) {
-                            if (sharedResourceModel != null) {
-                                logger.debug("Shared resource model size: {} statements (preserved for deduplication)",
-                                           sharedResourceModel.size());
-                            }
-                        }
                     }
                 } catch (InterruptedException e) {
                     logger.debug("Monitoring thread interrupted.");
@@ -988,58 +968,44 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return;
         }
 
-        // Usar modelo compartido para mantener identidad de recursos y mejorar deduplicación TDB2
-        Statement statement;
-        synchronized (sharedModelLock) {
-            Resource subject = sharedResourceModel.createResource(subjectUri);
-            if (subjectTypeUri != null) {
-                // Agregar tipo como statement separado si no existe
-                Resource typeResource = sharedResourceModel.createResource(subjectTypeUri);
-                Statement typeStatement = sharedResourceModel.createStatement(subject, RDF.type, typeResource);
-                if (!sharedResourceModel.contains(typeStatement)) {
-                    try {
-                        tripleBuffer.put(typeStatement);
-                        triplesProduced.incrementAndGet();
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        logger.warn("Interrupted while adding type statement to buffer.", e);
-                        return;
-                    }
-                }
-            }
-
-            Property predicate = sharedResourceModel.createProperty(predicateUri);
-            
-            RDFNode object;
-            if (OBJECT_PROPERTY.equals(predicateType)) {
-                object = sharedResourceModel.createResource(objectValue);
-                if (objectTypeUri != null) {
-                    // Agregar tipo del objeto como statement separado si no existe
-                    Resource objectTypeResource = sharedResourceModel.createResource(objectTypeUri);
-                    Statement objectTypeStatement = sharedResourceModel.createStatement((Resource)object, RDF.type, objectTypeResource);
-                    if (!sharedResourceModel.contains(objectTypeStatement)) {
-                        try {
-                            tripleBuffer.put(objectTypeStatement);
-                            triplesProduced.incrementAndGet();
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            logger.warn("Interrupted while adding object type statement to buffer.", e);
-                            return;
-                        }
-                    }
-                }
-            } else {
-                object = sharedResourceModel.createLiteral(objectValue);
-            }
-
-            statement = sharedResourceModel.createStatement(subject, predicate, object);
-        }
+        // Usar un modelo temporal y efímero para crear los objetos Statement.
+        // Esto elimina la necesidad de un modelo compartido y su bloqueo asociado, simplificando la concurrencia.
+        // TDB2 se encargará de la deduplicación de triples al momento de la escritura.
+        Model factoryModel = ModelFactory.createDefaultModel();
 
         try {
-            // Enviar statement principal al buffer
-            tripleBuffer.put(statement);
+            Resource subject = factoryModel.createResource(subjectUri);
+            Property predicate = factoryModel.createProperty(predicateUri);
+            RDFNode object;
+
+            // 1. Agregar la declaración de tipo para el sujeto (si aplica)
+            if (subjectTypeUri != null) {
+                Resource typeResource = factoryModel.createResource(subjectTypeUri);
+                Statement typeStatement = factoryModel.createStatement(subject, RDF.type, typeResource);
+                tripleBuffer.put(typeStatement);
+                triplesProduced.incrementAndGet();
+            }
+
+            // 2. Crear el objeto y su declaración de tipo (si aplica)
+            if (OBJECT_PROPERTY.equals(predicateType)) {
+                object = factoryModel.createResource(objectValue);
+                if (objectTypeUri != null) {
+                    Resource objectTypeResource = factoryModel.createResource(objectTypeUri);
+                    Statement objectTypeStatement = factoryModel.createStatement((Resource) object, RDF.type, objectTypeResource);
+                    tripleBuffer.put(objectTypeStatement);
+                    triplesProduced.incrementAndGet();
+                }
+            } else {
+                object = factoryModel.createLiteral(objectValue);
+            }
+
+            // 3. Crear y encolar la triple principal
+            Statement mainStatement = factoryModel.createStatement(subject, predicate, object);
+            tripleBuffer.put(mainStatement);
             triplesProduced.incrementAndGet();
+            
             logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
+
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logger.warn("Interrupted while waiting to add triple to buffer.", e);
@@ -1100,16 +1066,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 shutdownExecutor(indexingExecutor, "Indexing");
                 shutdownExecutor(utilityExecutor, "Utility");
                 
-                // 7. Clean up shared resource model
-                synchronized (sharedModelLock) {
-                    if (sharedResourceModel != null) {
-                        sharedResourceModel.close();
-                        sharedResourceModel = null;
-                        logger.info("Shared resource model closed.");
-                    }
-                }
-
-                // 8. Close TDB dataset
+                // 7. Close TDB dataset
                 if (hasTriplestore && dataset != null) {
                     if (dataset.isInTransaction()) {
                         logger.warn("Transaction was still active during close. Attempting to end.");
@@ -1531,17 +1488,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     }
                 }
             }
-        }
-    }
-    
-    private void initializeSharedResourceModel() {
-        synchronized (sharedModelLock) {
-            sharedResourceModel = ModelFactory.createDefaultModel();
-            // Configurar namespaces para el modelo compartido
-            if (namespaces != null) {
-                sharedResourceModel.setNsPrefixes(namespaces);
-            }
-            logger.info("Shared resource model initialized - will be preserved throughout execution for optimal deduplication");
         }
     }
 }
