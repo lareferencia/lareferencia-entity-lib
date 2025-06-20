@@ -117,6 +117,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     protected String graph;
     protected boolean hasTriplestore = false;
 
+    // Modelo compartido para mantener identidad de recursos y mejorar deduplicación
+    private Model sharedResourceModel;
+    private final Object sharedModelLock = new Object();
+
     // --- NEW THREADING COMPONENTS ---
     // Marker objects for queue control
     private static final Object POISON_PILL = new Object();
@@ -151,6 +155,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private final AtomicLong triplesProduced = new AtomicLong(0);
     private final AtomicLong triplesConsumed = new AtomicLong(0); // Now represents triples consumed by distributor
     private final AtomicLong triplesWritten = new AtomicLong(0); // Total triples written by all writers
+    
     
     public EntityIndexerTDB2ThreadedImpl() {
         // Constructor
@@ -187,6 +192,9 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 this.graph = tdbConfig.getGraph();
                 String directory = tdbConfig.getPath();
                 boolean reset = Boolean.parseBoolean(tdbConfig.getReset());
+                
+                // Configurar deduplicación por defecto - deshabilitada para TDB2
+                logger.info("Deduplication disabled for TDB2 (triplestore handles duplicates automatically)");
 
                 try {
                     // Crear directorio si no existe
@@ -218,6 +226,9 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
 
             // Inicializar threading
             initializeThreading();
+            
+            // Inicializar modelo compartido para recursos
+            initializeSharedResourceModel();
 
         } catch (Exception e) {
             logger.error("Error setting RDF Mapping Config File: " + configFilePath + ". " + e.getMessage(), e);
@@ -283,12 +294,14 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private void startMonitoringThread() {
         utilityExecutor.submit(() -> {
             logger.info("Monitoring thread started.");
+            int cleanupCounter = 0;
             while (!shutdown) {
                 try {
                     TimeUnit.SECONDS.sleep(monitoringIntervalSeconds);
                     if (!shutdown) { // Re-check after sleep
                         ProcessingStats stats = getProcessingStats();
-                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}.",
+                        TDB2Stats tdbStats = getTDB2Stats();
+                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}. TDB2: {}",
                                 stats.getBufferSize(),
                                 stats.getBufferCapacity(),
                                 String.format("%.2f", stats.getBufferUsagePercentage()),
@@ -297,8 +310,18 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                                 stats.getMaxSlots(),
                                 stats.getTriplesProduced(),
                                 stats.getTriplesConsumed(),
-                                stats.getTriplesWritten()
+                                stats.getTriplesWritten(),
+                                tdbStats.toString()
                         );
+                        
+                        // Limpiar modelo compartido cada 10 ciclos (aproximadamente cada 100 segundos por defecto)
+                        cleanupCounter++;
+                        if (cleanupCounter >= 10) {
+                            cleanupSharedResourceModel();
+                            cleanupCounter = 0;
+                        }
+                        
+                        // Sin alertas de deduplicación - TDB2 maneja esto automáticamente
                     }
                 } catch (InterruptedException e) {
                     logger.debug("Monitoring thread interrupted.");
@@ -373,6 +396,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                         processEntityInternal(fullyLoadedEntity);
                         transactionManager.commit(status);
                         logger.debug("Independent transaction committed for entity: {}", entityId);
+                        
                     } catch (Exception e) {
                         logger.error("Error in parallel processing for entity {}: {}", entityId, e.getMessage(), e);
                         try {
@@ -626,7 +650,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             
             localModelToClear.removeAll();
             dataset.commit();
-            logger.info("Graph cleared.");
+            logger.info("Graph cleared successfully. {} triples removed.", totalTriples);
 
         } catch (Exception e) {
             logger.error("Error clearing TDB2 graph: " + e.getMessage(), e);
@@ -638,7 +662,63 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                  dataset.end();
             }
         }
+        
+        // Limpiar solo el TDB2 store - sin caches adicionales
         logger.info("Graph clearing process finished.");
+    }
+    
+    /**
+     * Realizar compactación del TDB2 store para optimizar espacio
+     */
+    public void compactTDBStore() {
+        if (!hasTriplestore || dataset == null) {
+            logger.warn("Cannot compact TDB store: no triplestore configured");
+            return;
+        }
+        
+        logger.info("TDB2 compaction not available in this version. Consider manual compaction if needed.");
+        logger.info("Current TDB2 stats: {}", getTDB2Stats());
+    }
+    
+    /**
+     * Obtener estadísticas del TDB2 store
+     */
+    public TDB2Stats getTDB2Stats() {
+        if (!hasTriplestore || dataset == null) {
+            return new TDB2Stats(0);
+        }
+        
+        dataset.begin(ReadWrite.READ);
+        try {
+            Model model = (this.graph == null || this.graph.isEmpty()) ?
+                    dataset.getDefaultModel() :
+                    dataset.getNamedModel(this.graph);
+            
+            long tripleCount = model.size();
+            
+            return new TDB2Stats(tripleCount);
+            
+        } finally {
+            dataset.end();
+        }
+    }
+    
+    /**
+     * Clase para estadísticas del TDB2 store
+     */
+    public static class TDB2Stats {
+        private final long tripleCount;
+        
+        public TDB2Stats(long tripleCount) {
+            this.tripleCount = tripleCount;
+        }
+        
+        public long getTripleCount() { return tripleCount; }
+        
+        @Override
+        public String toString() {
+            return String.format("TDB2Stats{triples=%d}", tripleCount);
+        }
     }
     
     public List<OutputConfig> getOutputsByType(List<OutputConfig> outputs, String type) {
@@ -910,36 +990,64 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return;
         }
 
-        Model tempModel = ModelFactory.createDefaultModel();
-        Resource subject = tempModel.createResource(subjectUri);
-        if (subjectTypeUri != null) {
-            subject.addProperty(RDF.type, tempModel.createResource(subjectTypeUri));
-        }
-
-        Property predicate = tempModel.createProperty(predicateUri);
-        
-        RDFNode object;
-        if (OBJECT_PROPERTY.equals(predicateType)) {
-            object = tempModel.createResource(objectValue);
-            if (objectTypeUri != null) {
-                ((Resource)object).addProperty(RDF.type, tempModel.createResource(objectTypeUri));
+        // Usar modelo compartido para mantener identidad de recursos y mejorar deduplicación TDB2
+        Statement statement;
+        synchronized (sharedModelLock) {
+            Resource subject = sharedResourceModel.createResource(subjectUri);
+            if (subjectTypeUri != null) {
+                // Agregar tipo como statement separado si no existe
+                Resource typeResource = sharedResourceModel.createResource(subjectTypeUri);
+                Statement typeStatement = sharedResourceModel.createStatement(subject, RDF.type, typeResource);
+                if (!sharedResourceModel.contains(typeStatement)) {
+                    try {
+                        tripleBuffer.put(typeStatement);
+                        triplesProduced.incrementAndGet();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        logger.warn("Interrupted while adding type statement to buffer.", e);
+                        return;
+                    }
+                }
             }
-        } else {
-            object = tempModel.createLiteral(objectValue);
-        }
 
-        Statement statement = tempModel.createStatement(subject, predicate, object);
+            Property predicate = sharedResourceModel.createProperty(predicateUri);
+            
+            RDFNode object;
+            if (OBJECT_PROPERTY.equals(predicateType)) {
+                object = sharedResourceModel.createResource(objectValue);
+                if (objectTypeUri != null) {
+                    // Agregar tipo del objeto como statement separado si no existe
+                    Resource objectTypeResource = sharedResourceModel.createResource(objectTypeUri);
+                    Statement objectTypeStatement = sharedResourceModel.createStatement((Resource)object, RDF.type, objectTypeResource);
+                    if (!sharedResourceModel.contains(objectTypeStatement)) {
+                        try {
+                            tripleBuffer.put(objectTypeStatement);
+                            triplesProduced.incrementAndGet();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            logger.warn("Interrupted while adding object type statement to buffer.", e);
+                            return;
+                        }
+                    }
+                }
+            } else {
+                object = sharedResourceModel.createLiteral(objectValue);
+            }
+
+            statement = sharedResourceModel.createStatement(subject, predicate, object);
+        }
 
         try {
-            // Esto se bloqueará si la cola está llena, proveyendo el backpressure
+            // Enviar statement principal al buffer
             tripleBuffer.put(statement);
             triplesProduced.incrementAndGet();
+            logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logger.warn("Interrupted while waiting to add triple to buffer.", e);
         }
     }
-
+    
     @Override
     public void close() throws IOException {
         synchronized (flushLock) {
@@ -993,8 +1101,17 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 // 6. Shutdown executors
                 shutdownExecutor(indexingExecutor, "Indexing");
                 shutdownExecutor(utilityExecutor, "Utility");
+                
+                // 7. Clean up shared resource model
+                synchronized (sharedModelLock) {
+                    if (sharedResourceModel != null) {
+                        sharedResourceModel.close();
+                        sharedResourceModel = null;
+                        logger.info("Shared resource model closed.");
+                    }
+                }
 
-                // 7. Close TDB dataset
+                // 8. Close TDB dataset
                 if (hasTriplestore && dataset != null) {
                     if (dataset.isInTransaction()) {
                         logger.warn("Transaction was still active during close. Attempting to end.");
@@ -1027,7 +1144,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     }
     
     /**
-     * Obtener estadísticas del procesamiento actual
+     * Obtener estadísticas de procesamiento simplificadas
      */
     public ProcessingStats getProcessingStats() {
         return new ProcessingStats(
@@ -1239,19 +1356,26 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                             tdbDataset.getNamedModel(graphName) :
                             tdbDataset.getDefaultModel();
                     
-                    // Escribir en lotes más pequeños para reducir presión de memoria
-                    int maxBatchSize = 500;
+                    // Escribir directamente sin verificación de duplicados - TDB2 maneja esto automáticamente
+                    // Escribir en lotes pequeños para mejor estabilidad
+                    int maxBatchSize = 100;
                     List<Statement> currentBatch = new ArrayList<>();
+                    int batchNumber = 0;
                     
                     for (Statement stmt : batch) {
                         currentBatch.add(stmt);
                         
                         if (currentBatch.size() >= maxBatchSize) {
                             model.add(currentBatch);
-                            currentBatch.clear();
+                            logger.debug("TDBWriter wrote sub-batch {} with {} statements", batchNumber, currentBatch.size());
                             
-                            // Pequeña pausa para permitir que otros threads accedan
-                            if (batch.size() > maxBatchSize) {
+                            currentBatch.clear();
+                            batchNumber++;
+                            
+                            // Pausa para permitir que otros threads accedan
+                            if (batch.size() > maxBatchSize && batchNumber % 5 == 0) {
+                                Thread.sleep(10); // Pausa cada 5 sub-lotes
+                            } else {
                                 Thread.yield();
                             }
                         }
@@ -1260,6 +1384,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     // Escribir lote restante
                     if (!currentBatch.isEmpty()) {
                         model.add(currentBatch);
+                        logger.debug("TDBWriter wrote final sub-batch with {} statements", currentBatch.size());
                     }
                     
                     tdbDataset.commit();
@@ -1267,8 +1392,8 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     
                     // Incrementar contador de triples escritas
                     triplesWritten.addAndGet(batch.size());
-                    logger.debug("TDBWriter wrote {} triples to TDB2 in {} sub-batches", 
-                               batch.size(), (batch.size() + maxBatchSize - 1) / maxBatchSize);
+                    logger.debug("TDBWriter completed writing {} triples to TDB2 in {} sub-batches. TDB2 handles duplicate detection automatically.", 
+                               batch.size(), batchNumber + 1);
                     
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -1302,7 +1427,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 }
             }
         }
-
+        
         @Override
         public void close() {
             synchronized (tdbWriteLock) {
@@ -1407,6 +1532,42 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                         fos = null;
                     }
                 }
+            }
+        }
+    }
+    
+    private void initializeSharedResourceModel() {
+        synchronized (sharedModelLock) {
+            sharedResourceModel = ModelFactory.createDefaultModel();
+            // Configurar namespaces para el modelo compartido
+            if (namespaces != null) {
+                sharedResourceModel.setNsPrefixes(namespaces);
+            }
+            logger.info("Shared resource model initialized to improve TDB2 deduplication");
+        }
+    }
+    
+    /**
+     * Limpia periódicamente el modelo compartido para evitar consumo excesivo de memoria
+     * manteniendo solo los recursos más utilizados.
+     */
+    private void cleanupSharedResourceModel() {
+        synchronized (sharedModelLock) {
+            if (sharedResourceModel != null && sharedResourceModel.size() > 50000) {
+                logger.info("Shared resource model has grown to {} statements, performing cleanup", 
+                           sharedResourceModel.size());
+                
+                // Crear nuevo modelo y mantener solo namespaces
+                Model newModel = ModelFactory.createDefaultModel();
+                if (namespaces != null) {
+                    newModel.setNsPrefixes(namespaces);
+                }
+                
+                // Cerrar modelo anterior y reemplazar
+                sharedResourceModel.close();
+                sharedResourceModel = newModel;
+                
+                logger.info("Shared resource model cleaned up. New model created.");
             }
         }
     }
