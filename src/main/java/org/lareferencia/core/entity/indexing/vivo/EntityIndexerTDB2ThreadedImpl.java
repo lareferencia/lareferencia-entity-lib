@@ -29,6 +29,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -350,38 +351,60 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         logger.debug("Registered with phaser. Current parties: {}", activeIndexingPhaser.getRegisteredParties());
         
         try {
-            // Enviar la entidad directamente al procesamiento paralelo SIN precargar datos
-            // El preload se hará dentro del thread paralelo
+            // Capturar solo el UUID de la entidad para evitar problemas de concurrencia con Hibernate
+            final UUID entityId = entity.getId();
+            final Long entityTypeId = entity.getEntityTypeId();
+            
+            // Enviar solo los IDs al procesamiento paralelo
             CompletableFuture.runAsync(() -> {
                 try {
-                    logger.debug("Processing entity {} in thread: {}", entity.getId(), Thread.currentThread().getName());
+                    logger.debug("Processing entity {} in thread: {}", entityId, Thread.currentThread().getName());
                     
-                    // Crear una nueva transacción en el thread separado
+                    // Crear una nueva transacción COMPLETAMENTE INDEPENDIENTE
                     DefaultTransactionDefinition def = new DefaultTransactionDefinition();
-                    def.setIsolationLevel(TransactionDefinition.ISOLATION_READ_UNCOMMITTED);
+                    def.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
                     def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                    def.setTimeout(300); // 5 minutos timeout
                     
                     TransactionStatus status = transactionManager.getTransaction(def);
-                    logger.debug("Transaction started for entity: {}", entity.getId());
+                    logger.debug("Independent transaction started for entity: {}", entityId);
                     
                     try {
+                        // Recargar la entidad desde la BD en este thread independiente
+                        Optional<Entity> freshEntityOpt = entityDataService.getEntityById(entityId);
+                        if (!freshEntityOpt.isPresent()) {
+                            logger.warn("Entity {} not found during parallel processing", entityId);
+                            return;
+                        }
+                        
+                        Entity freshEntity = freshEntityOpt.get();
+                        
                         // MOVER el preload aquí dentro del thread paralelo
-                        Entity fullyLoadedEntity = preloadEntityData(entity);
-                        logger.debug("Entity data preloaded for entity: {} in parallel thread", entity.getId());
+                        Entity fullyLoadedEntity = preloadEntityData(freshEntity);
+                        logger.debug("Entity data preloaded for entity: {} in parallel thread", entityId);
                         
                         processEntityInternal(fullyLoadedEntity);
                         transactionManager.commit(status);
-                        logger.debug("Transaction committed for entity: {}", entity.getId());
+                        logger.debug("Independent transaction committed for entity: {}", entityId);
                     } catch (Exception e) {
-                        transactionManager.rollback(status);
-                        logger.error("Transaction rolled back for entity {}: {}", entity.getId(), e.getMessage(), e);
+                        logger.error("Error in parallel processing for entity {}: {}", entityId, e.getMessage(), e);
+                        try {
+                            if (status != null && !status.isCompleted()) {
+                                transactionManager.rollback(status);
+                                logger.debug("Independent transaction rolled back for entity: {}", entityId);
+                            }
+                        } catch (Exception rollbackException) {
+                            logger.error("Error during rollback for entity {}: {}", entityId, rollbackException.getMessage());
+                        }
                         throw new RuntimeException(e);
                     }
+                } catch (Exception e) {
+                    logger.error("Fatal error in parallel thread for entity {}: {}", entityId, e.getMessage(), e);
                 } finally {
                     // Liberar el permiso del semáforo SIEMPRE
                     concurrentTasksSemaphore.release();
                     logger.debug("Released semaphore permit for entity: {} (available: {})", 
-                                entity.getId(), concurrentTasksSemaphore.availablePermits());
+                                entityId, concurrentTasksSemaphore.availablePermits());
                     
                     // Desregistrar este hilo del phaser
                     activeIndexingPhaser.arriveAndDeregister();
@@ -390,7 +413,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             }, indexingExecutor);
             
             // El método retorna inmediatamente sin esperar el preload ni el procesamiento
-            logger.debug("Entity {} queued for async processing (preload will happen in parallel)", entity.getId());
+            logger.debug("Entity {} queued for async processing (will be reloaded in parallel)", entityId);
             
         } catch (Exception e) {
             // Si hay error en el setup, liberar semáforo y desregistrar del phaser
