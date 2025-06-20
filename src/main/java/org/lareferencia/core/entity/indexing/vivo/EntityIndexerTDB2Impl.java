@@ -12,18 +12,13 @@ import java.util.Map;
 import java.util.UUID;
 
 import org.apache.jena.query.Dataset;
-// import org.apache.jena.query.QueryExecution; // No usado directamente en la última versión
-// import org.apache.jena.query.QueryExecutionFactory; // No usado directamente en la última versión
-// import org.apache.jena.query.QuerySolution; // No usado directamente en la última versión
 import org.apache.jena.query.ReadWrite;
-// import org.apache.jena.query.ResultSet; // No usado directamente en la última versión
 import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.Property;
 import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.Statement;
-// import org.apache.jena.rdf.model.StmtIterator; // No usado directamente en la última versión
 import org.apache.jena.tdb.TDBFactory;
 import org.apache.jena.vocabulary.RDF;
 import org.apache.logging.log4j.LogManager;

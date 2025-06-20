@@ -26,6 +26,7 @@
 
 	<properties>
 		<elastic.version>7.17.5</elastic.version>
+		<jena.version>4.10.0</jena.version>
 	</properties>
 
 
@@ -34,6 +35,18 @@
 		<artifactId>lareferencia-parent</artifactId>
 		<version>4.2.5</version>
 	</parent>
+
+	<dependencyManagement>
+		<dependencies>
+			<dependency>
+				<groupId>org.apache.jena</groupId>
+				<artifactId>apache-jena-libs</artifactId>
+				<version>${jena.version}</version>
+				<type>pom</type>
+				<scope>import</scope>
+			</dependency>
+		</dependencies>
+	</dependencyManagement>
 
 	<dependencies>
 
@@ -108,14 +121,7 @@
 			<artifactId>jackson-datatype-guava</artifactId>
 		</dependency>
 
-		<!-- Jena -->
-		<dependency>
-			<groupId>org.apache.jena</groupId>
-			<artifactId>apache-jena-libs</artifactId>
-			<version>3.17.0</version>
-			<type>pom</type>
-		</dependency>
-
+	
 		<dependency>
 			<groupId>net.openhft</groupId>
 			<artifactId>zero-allocation-hashing</artifactId>
@@ -180,3 +186,4 @@
 	</build>
 
 </project>
+				
