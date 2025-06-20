@@ -294,7 +294,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private void startMonitoringThread() {
         utilityExecutor.submit(() -> {
             logger.info("Monitoring thread started.");
-            int cleanupCounter = 0;
             while (!shutdown) {
                 try {
                     TimeUnit.SECONDS.sleep(monitoringIntervalSeconds);
@@ -314,14 +313,13 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                                 tdbStats.toString()
                         );
                         
-                        // Limpiar modelo compartido cada 10 ciclos (aproximadamente cada 100 segundos por defecto)
-                        cleanupCounter++;
-                        if (cleanupCounter >= 10) {
-                            cleanupSharedResourceModel();
-                            cleanupCounter = 0;
+                        // Log shared model statistics without cleanup
+                        synchronized (sharedModelLock) {
+                            if (sharedResourceModel != null) {
+                                logger.debug("Shared resource model size: {} statements (preserved for deduplication)",
+                                           sharedResourceModel.size());
+                            }
                         }
-                        
-                        // Sin alertas de deduplicación - TDB2 maneja esto automáticamente
                     }
                 } catch (InterruptedException e) {
                     logger.debug("Monitoring thread interrupted.");
@@ -472,7 +470,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 logger.debug("Found {} relations of type {} for entity: {}", relations.size(), relationName, entity.getId());
                 
                 for (Relation relation : relations) {
-                    // Forzar carga de entidad relacionada
+                    // Forzar carga de entidade relacionada
                     Entity relatedEntity = relation.getRelatedEntity(entity.getId());
                     if (relatedEntity != null) {
                         // Asegurar que la entidad relacionada esté completamente cargada
@@ -561,7 +559,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             logger.debug("Internal processing completed for entity: {}. Processed {} relation configs", entity.getId(), relationConfigCount);
             
         } catch (CacheException | EntityRelationException e) {
-            logger.error("Cache/Relation error for entity {}: {}", entity.getId(), e.getMessage(), e);
+            logger.error("Cache/Relation error for entity {}: {}", entity.getId(), e.getMessage, e);
             throw new EntityIndexingException("Indexing error for entity: " + entity.getId() + ". " + e.getMessage());
         } catch (Exception e) { 
             logger.error("Unexpected error processing entity {}: {}", entity.getId(), e.getMessage(), e);
@@ -1543,32 +1541,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             if (namespaces != null) {
                 sharedResourceModel.setNsPrefixes(namespaces);
             }
-            logger.info("Shared resource model initialized to improve TDB2 deduplication");
-        }
-    }
-    
-    /**
-     * Limpia periódicamente el modelo compartido para evitar consumo excesivo de memoria
-     * manteniendo solo los recursos más utilizados.
-     */
-    private void cleanupSharedResourceModel() {
-        synchronized (sharedModelLock) {
-            if (sharedResourceModel != null && sharedResourceModel.size() > 50000) {
-                logger.info("Shared resource model has grown to {} statements, performing cleanup", 
-                           sharedResourceModel.size());
-                
-                // Crear nuevo modelo y mantener solo namespaces
-                Model newModel = ModelFactory.createDefaultModel();
-                if (namespaces != null) {
-                    newModel.setNsPrefixes(namespaces);
-                }
-                
-                // Cerrar modelo anterior y reemplazar
-                sharedResourceModel.close();
-                sharedResourceModel = newModel;
-                
-                logger.info("Shared resource model cleaned up. New model created.");
-            }
+            logger.info("Shared resource model initialized - will be preserved throughout execution for optimal deduplication");
         }
     }
 }
