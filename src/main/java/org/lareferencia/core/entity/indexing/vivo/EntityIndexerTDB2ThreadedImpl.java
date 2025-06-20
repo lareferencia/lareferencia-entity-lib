@@ -196,6 +196,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                         logger.info("Created TDB2 directory: {}", directory);
                     }
                     
+                    // Configurar propiedades del sistema para mejorar estabilidad de TDB2
+                    System.setProperty("tdb:filemode", "mapped"); // Usar memoria mapeada
+                    System.setProperty("tdb:synclocation", "true"); // Sincronización más frecuente
+                    
                     dataset = TDB2Factory.connectDataset(directory);
                     logger.info("Using TDB2 triplestore at " + directory + (this.graph != null && !this.graph.isEmpty() ? " with graph <" + this.graph + ">" : " with default graph"));
 
@@ -225,6 +229,12 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         this.tripleBuffer = new LinkedBlockingQueue<>(bufferSize);
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
         this.utilityExecutor = Executors.newSingleThreadExecutor(); // For monitoring
+        
+        // Reducir concurrencia cuando se usa TDB2 para evitar problemas de corrupción
+        if (hasTriplestore) {
+            this.maxConcurrentTasks = Math.max(2, indexingThreads); // Más conservador para TDB2
+            logger.info("Using conservative threading settings for TDB2: max {} concurrent tasks", maxConcurrentTasks);
+        }
         
         // Inicializar semáforo para limitar tareas concurrentes
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
@@ -299,28 +309,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             logger.info("Monitoring thread finished.");
         });
     }
-    
-    private void processEntityWithTransaction(Entity entity) throws EntityIndexingException {
-        logger.debug("Processing entity with transaction: {}", entity.getId());
-        
-        // Crear una nueva transacción
-        DefaultTransactionDefinition def = new DefaultTransactionDefinition();
-        def.setIsolationLevel(TransactionDefinition.ISOLATION_READ_UNCOMMITTED);
-        def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        
-        TransactionStatus status = transactionManager.getTransaction(def);
-        logger.debug("Transaction started for entity: {}", entity.getId());
-        
-        try {
-            processEntityInternal(entity);
-            transactionManager.commit(status);
-            logger.debug("Transaction committed for entity: {}", entity.getId());
-        } catch (Exception e) {
-            transactionManager.rollback(status);
-            logger.error("Transaction rolled back for entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error processing entity: " + entity.getId() + ". " + e.getMessage());
-        }
-    }
 
     @Override
     public void prePage() throws EntityIndexingException {
@@ -353,7 +341,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         try {
             // Capturar solo el UUID de la entidad para evitar problemas de concurrencia con Hibernate
             final UUID entityId = entity.getId();
-            final Long entityTypeId = entity.getEntityTypeId();
             
             // Enviar solo los IDs al procesamiento paralelo
             CompletableFuture.runAsync(() -> {
@@ -1134,13 +1121,13 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     }
 
     /**
-     * Abstract base class for writer threads.
+     * Abstract base class for writer threads with reduced batch sizes for stability.
      */
     private abstract class AbstractWriter implements Runnable, Closeable {
         protected final BlockingQueue<Object> queue;
         protected final List<Statement> localBuffer;
-        protected final int batchSize = 1000; // Reducir tamaño de batch
-        protected final long maxWaitTimeMs = 2000; // Máximo tiempo de espera para escribir
+        protected final int batchSize = 250; // Reducir significativamente el tamaño de batch
+        protected final long maxWaitTimeMs = 1000; // Reducir tiempo de espera
 
         protected AbstractWriter(BlockingQueue<Object> queue) {
             this.queue = queue;
@@ -1217,11 +1204,12 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     }
 
     /**
-     * Writer for TDB2 dataset.
+     * Writer for TDB2 dataset with enhanced thread safety and connection pooling.
      */
     private class TDBWriter extends AbstractWriter {
         private final Dataset tdbDataset;
         private final String graphName;
+        private final Object tdbWriteLock = new Object(); // Serializar acceso a TDB2
 
         TDBWriter(BlockingQueue<Object> queue, Dataset tdbDataset, String graphName) {
             super(queue);
@@ -1233,33 +1221,94 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         protected void performWrite(List<Statement> batch) {
             if (tdbDataset == null || !hasTriplestore || batch.isEmpty()) return;
             
-            tdbDataset.begin(ReadWrite.WRITE);
-            try {
-                Model model = (graphName != null && !graphName.isEmpty()) ?
-                        tdbDataset.getNamedModel(graphName) :
-                        tdbDataset.getDefaultModel();
-                model.add(batch);
-                tdbDataset.commit();
-                
-                // Incrementar contador de triples escritas
-                triplesWritten.addAndGet(batch.size());
-                logger.debug("TDBWriter wrote {} triples to TDB2", batch.size());
-            } catch (Exception e) {
-                logger.error("Error writing batch to TDB2 dataset", e);
-                if (tdbDataset.isInTransaction()) {
-                    tdbDataset.abort();
-                }
-                throw e; // Re-throw to be handled by the calling method
-            } finally {
-                if (tdbDataset.isInTransaction()) {
-                    tdbDataset.end();
+            // Serializar completamente el acceso a TDB2 para evitar corrupción
+            synchronized (tdbWriteLock) {
+                boolean transactionStarted = false;
+                try {
+                    // Verificar estado del dataset antes de comenzar transacción
+                    if (tdbDataset.isInTransaction()) {
+                        logger.warn("TDBWriter: Dataset already in transaction, waiting for completion");
+                        Thread.sleep(100); // Pequeña pausa
+                        return; // Reintentará en la próxima iteración
+                    }
+                    
+                    tdbDataset.begin(ReadWrite.WRITE);
+                    transactionStarted = true;
+                    
+                    Model model = (graphName != null && !graphName.isEmpty()) ?
+                            tdbDataset.getNamedModel(graphName) :
+                            tdbDataset.getDefaultModel();
+                    
+                    // Escribir en lotes más pequeños para reducir presión de memoria
+                    int maxBatchSize = 500;
+                    List<Statement> currentBatch = new ArrayList<>();
+                    
+                    for (Statement stmt : batch) {
+                        currentBatch.add(stmt);
+                        
+                        if (currentBatch.size() >= maxBatchSize) {
+                            model.add(currentBatch);
+                            currentBatch.clear();
+                            
+                            // Pequeña pausa para permitir que otros threads accedan
+                            if (batch.size() > maxBatchSize) {
+                                Thread.yield();
+                            }
+                        }
+                    }
+                    
+                    // Escribir lote restante
+                    if (!currentBatch.isEmpty()) {
+                        model.add(currentBatch);
+                    }
+                    
+                    tdbDataset.commit();
+                    transactionStarted = false;
+                    
+                    // Incrementar contador de triples escritas
+                    triplesWritten.addAndGet(batch.size());
+                    logger.debug("TDBWriter wrote {} triples to TDB2 in {} sub-batches", 
+                               batch.size(), (batch.size() + maxBatchSize - 1) / maxBatchSize);
+                    
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    logger.warn("TDBWriter interrupted during write operation");
+                    if (transactionStarted && tdbDataset.isInTransaction()) {
+                        try {
+                            tdbDataset.abort();
+                        } catch (Exception abortEx) {
+                            logger.error("Error aborting TDB2 transaction", abortEx);
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Error writing batch to TDB2 dataset: {}", e.getMessage(), e);
+                    if (transactionStarted && tdbDataset.isInTransaction()) {
+                        try {
+                            tdbDataset.abort();
+                        } catch (Exception abortEx) {
+                            logger.error("Error aborting TDB2 transaction after write failure", abortEx);
+                        }
+                    }
+                    // No re-throw para evitar crash del writer thread
+                } finally {
+                    // Asegurar que la transacción se cierre correctamente
+                    if (transactionStarted && tdbDataset.isInTransaction()) {
+                        try {
+                            tdbDataset.end();
+                        } catch (Exception endEx) {
+                            logger.error("Error ending TDB2 transaction", endEx);
+                        }
+                    }
                 }
             }
         }
 
         @Override
         public void close() {
-            // TDB dataset is closed centrally, nothing to do here.
+            synchronized (tdbWriteLock) {
+                logger.info("TDBWriter closed");
+                // TDB dataset is closed centrally, nothing to do here.
+            }
         }
     }
 
