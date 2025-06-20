@@ -559,7 +559,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             logger.debug("Internal processing completed for entity: {}. Processed {} relation configs", entity.getId(), relationConfigCount);
             
         } catch (CacheException | EntityRelationException e) {
-            logger.error("Cache/Relation error for entity {}: {}", entity.getId(), e.getMessage, e);
+            logger.error("Cache/Relation error for entity {}: {}", entity.getId(), e.getMessage(), e);
             throw new EntityIndexingException("Indexing error for entity: " + entity.getId() + ". " + e.getMessage());
         } catch (Exception e) { 
             logger.error("Unexpected error processing entity {}: {}", entity.getId(), e.getMessage(), e);
