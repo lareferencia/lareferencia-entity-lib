@@ -52,7 +52,7 @@ import org.apache.jena.rdf.model.Property;
 import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.Statement;
-import org.apache.jena.tdb2.TDB2Factory;
+import org.apache.jena.tdb.TDBFactory;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -84,7 +84,11 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable {
+/**
+ * Implementación threaded del indexer para TDB1 (Apache Jena TDB versión 1.x)
+ * Utiliza la misma arquitectura que TDB2ThreadedImpl pero con TDB1Factory
+ */
+public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable {
 
     @Autowired
     EntityDataService entityDataService;
@@ -107,7 +111,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private static final String NEW_ENTITY = "new";
     private static final String OBJECT_PROPERTY = "objectProperty";
 
-    protected static Logger logger = LogManager.getLogger(EntityIndexerTDB2ThreadedImpl.class);
+    protected static Logger logger = LogManager.getLogger(EntityIndexerTDB1ThreadedImpl.class);
 
     protected Map<String, EntityIndexingConfig> configsByEntityType;
     protected Map<String, String> namespaces;
@@ -117,24 +121,23 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     protected String graph;
     protected boolean hasTriplestore = false;
 
-    // --- NEW THREADING COMPONENTS ---
-    // Marker objects for queue control
+    // --- THREADING COMPONENTS (idénticos a TDB2) ---
     private static final Object POISON_PILL = new Object();
     private static class FlushMarker {
         final CountDownLatch latch;
         FlushMarker(CountDownLatch latch) { this.latch = latch; }
     }
 
-    private ExecutorService indexingExecutor; // For producers
-    private ExecutorService utilityExecutor; // For monitoring
+    private ExecutorService indexingExecutor;
+    private ExecutorService utilityExecutor;
     
-    private BlockingQueue<Object> tripleBuffer; // Main input queue for RDFTripleData, FlushMarkers, POISON_PILL
+    private BlockingQueue<Object> tripleBuffer;
     private final List<BlockingQueue<Object>> outputQueues = new ArrayList<>();
     private final List<Thread> writerThreads = new ArrayList<>();
     private Thread distributorThread;
-    private final List<Closeable> writers = new ArrayList<>(); // To close them gracefully
+    private final List<Closeable> writers = new ArrayList<>();
 
-    private final Phaser activeIndexingPhaser = new Phaser(1); // Tracks producer tasks
+    private final Phaser activeIndexingPhaser = new Phaser(1);
     private volatile boolean shutdown = false;
     private final Object flushLock = new Object();
     
@@ -142,31 +145,23 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private int indexingThreads = Runtime.getRuntime().availableProcessors();
     private int bufferSize = 10000;
     private long monitoringIntervalSeconds = 10;
-    
-    // Limitar tareas concurrentes para evitar saturar la BD
-    private int maxConcurrentTasks = indexingThreads * 2; // 2x los threads disponibles
+    private int maxConcurrentTasks = indexingThreads * 2;
     private Semaphore concurrentTasksSemaphore;
 
     // Stats
     private final AtomicLong triplesProduced = new AtomicLong(0);
-    private final AtomicLong triplesConsumed = new AtomicLong(0); // Now represents triples consumed by distributor
-    private final AtomicLong triplesWritten = new AtomicLong(0); // Total triples written by all writers
-    private final AtomicLong triplesDuplicated = new AtomicLong(0); // Triples that would be duplicated
-    
-    // Para tracking de duplicados - usando un Set thread-safe con hash de triples
+    private final AtomicLong triplesConsumed = new AtomicLong(0);
+    private final AtomicLong triplesWritten = new AtomicLong(0);
+    private final AtomicLong triplesDuplicated = new AtomicLong(0);
     private final Set<String> seenTriples = ConcurrentHashMap.newKeySet();
     
-    
-    public EntityIndexerTDB2ThreadedImpl() {
+    public EntityIndexerTDB1ThreadedImpl() {
         // Constructor
     }
 
     @Override
     public void setConfig(String configFilePath) {
         try {
-            // NO llamar a JenaSystem.init() para evitar que se carguen módulos de TDB1
-            // La inicialización se hará automáticamente cuando sea necesaria
-            
             indexingConfig = IndexingConfiguration.loadFromXml(configFilePath);
             List<OutputConfig> outputs = indexingConfig.getOutputs();
             namespaces = new HashMap<>();
@@ -181,10 +176,9 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             }
 
             logger.info("RDF Mapping Config File: " + configFilePath + " loaded.");
-
             loadOccurFilters();
 
-            // Configurar triplestore (opcional)
+            // Configurar triplestore TDB1
             List<OutputConfig> tdbOutputs = getOutputsByType(outputs, "triplestore");
             if (!tdbOutputs.isEmpty()) {
                 OutputConfig tdbConfig = tdbOutputs.get(0);
@@ -193,54 +187,46 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 String directory = tdbConfig.getPath();
                 boolean reset = Boolean.parseBoolean(tdbConfig.getReset());
                 
-                // Configurar deduplicación por defecto - deshabilitada para TDB2
-                logger.info("Deduplication disabled for TDB2 (triplestore handles duplicates automatically)");
+                logger.info("TDB1 deduplication enabled at application level");
 
                 try {
-                    // Crear directorio si no existe
                     java.io.File tdbDir = new java.io.File(directory);
                     if (!tdbDir.exists()) {
                         tdbDir.mkdirs();
-                        logger.info("Created TDB2 directory: {}", directory);
+                        logger.info("Created TDB1 directory: {}", directory);
                     }
                     
-                    // Configurar propiedades del sistema para mejorar estabilidad de TDB2
-                    System.setProperty("tdb:filemode", "mapped"); // Usar memoria mapeada
-                    System.setProperty("tdb:synclocation", "true"); // Sincronización más frecuente
-                    
-                    dataset = TDB2Factory.connectDataset(directory);
-                    logger.info("Using TDB2 triplestore at " + directory + (this.graph != null && !this.graph.isEmpty() ? " with graph <" + this.graph + ">" : " with default graph"));
+                    // Usar TDB1Factory en lugar de TDB2Factory
+                    dataset = TDBFactory.createDataset(directory);
+                    logger.info("Using TDB1 triplestore at " + directory + (this.graph != null && !this.graph.isEmpty() ? " with graph <" + this.graph + ">" : " with default graph"));
 
                     if (reset) {
                         clearTDBStore();
                     }
                 } catch (Exception e) {
-                    logger.error("Failed to initialize TDB2 dataset at {}: {}", directory, e.getMessage(), e);
+                    logger.error("Failed to initialize TDB1 dataset at {}: {}", directory, e.getMessage(), e);
                     hasTriplestore = false;
-                    throw new RuntimeException("TDB2 initialization failed", e);
+                    throw new RuntimeException("TDB1 initialization failed", e);
                 }
             } else {
                 hasTriplestore = false;
                 logger.info("No triplestore configured. Using in-memory models for RDF generation.");
             }
 
-            // Inicializar threading
             initializeThreading();
 
         } catch (Exception e) {
             logger.error("Error setting RDF Mapping Config File: " + configFilePath + ". " + e.getMessage(), e);
-            throw new RuntimeException("Configuration failed for EntityIndexerTDB2ThreadedImpl", e);
+            throw new RuntimeException("Configuration failed for EntityIndexerTDB1ThreadedImpl", e);
         }
     }
-    
+
     private Model globalModel; // Modelo global
 
     private void initializeThreading() {
         this.tripleBuffer = new LinkedBlockingQueue<>(bufferSize);
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
-        this.utilityExecutor = Executors.newSingleThreadExecutor(); // For monitoring
-        
-        // Inicializar semáforo para limitar tareas concurrentes
+        this.utilityExecutor = Executors.newSingleThreadExecutor();
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
 
         List<OutputConfig> outputs = indexingConfig.getOutputs();
@@ -252,11 +238,11 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             
             try {
                 String outputType = output.getType();
-                if ("TDB2".equalsIgnoreCase(outputType) || "triplestore".equalsIgnoreCase(outputType)) {
+                if ("TDB1".equalsIgnoreCase(outputType) || "triplestore".equalsIgnoreCase(outputType)) {
                     if (hasTriplestore) {
-                        TDBWriter writer = new TDBWriter(queue, dataset, graph);
+                        TDB1Writer writer = new TDB1Writer(queue, dataset, graph);
                         writers.add(writer);
-                        writerThreads.add(new Thread(writer, "TDBWriter-Thread"));
+                        writerThreads.add(new Thread(writer, "TDB1Writer-Thread"));
                     }
                 } else if ("XML".equalsIgnoreCase(outputType) || "file".equalsIgnoreCase(outputType)) {
                     XMLWriter writer = new XMLWriter(queue, output, namespaces);
@@ -280,9 +266,9 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         // Iniciar el monitor de estado
         startMonitoringThread();
         
-        logger.info("Threading initialized with {} indexing threads, max {} concurrent tasks, 1 distributor, and {} writers.", 
+        logger.info("TDB1 Threading initialized with {} indexing threads, max {} concurrent tasks, 1 distributor, and {} writers.", 
                    indexingThreads, maxConcurrentTasks, writerThreads.size());
-        logger.info("Duplicate detection enabled - statistics are approximated as TDB2 handles final deduplication.");
+        logger.info("TDB1 Duplicate detection enabled - statistics tracked at application level.");
     }
     
     private void startMonitoringThread() {
@@ -293,8 +279,8 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     TimeUnit.SECONDS.sleep(monitoringIntervalSeconds);
                     if (!shutdown) { // Re-check after sleep
                         ProcessingStats stats = getProcessingStats();
-                        TDB2Stats tdbStats = getTDB2Stats();
-                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB2: {}",
+                        TDB1Stats tdbStats = getTDB1Stats();
+                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB1: {}",
                                 stats.getBufferSize(),
                                 stats.getBufferCapacity(),
                                 String.format("%.2f", stats.getBufferUsagePercentage()),
@@ -605,7 +591,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     String.format("%.2f", finalStats.getDuplicationPercentage()),
                     finalStats.getTriplesWritten()
             );
-            logger.info("Note: Duplicate statistics are approximated. TDB2 performs final deduplication during storage.");
+            logger.info("Note: Duplicate statistics are approximated. TDB1 performs final deduplication during storage.");
             
             // NO shutdown el indexer - solo hacer flush
             // El indexer debe seguir funcionando para procesar más entidades
@@ -625,7 +611,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     }
 
     private void clearTDBStore() {
-        logger.info("Reset option set to true. Clearing graph in TDB2 store...");
+        logger.info("Reset option set to true. Clearing graph in TDB1 store...");
         
         if (dataset == null) {
             logger.error("Dataset is null, cannot clear TDB store.");
@@ -655,7 +641,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             logger.info("Graph cleared successfully. {} triples removed.", totalTriples);
 
         } catch (Exception e) {
-            logger.error("Error clearing TDB2 graph: " + e.getMessage(), e);
+            logger.error("Error clearing TDB1 graph: " + e.getMessage(), e);
             if (dataset.isInTransaction()) {
                 dataset.abort();
             }
@@ -665,12 +651,12 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             }
         }
         
-        // Limpiar solo el TDB2 store - sin caches adicionales
+        // Limpiar solo el TDB1 store - sin caches adicionales
         logger.info("Graph clearing process finished.");
     }
     
     /**
-     * Realizar compactación del TDB2 store para optimizar espacio
+     * Realizar compactación del TDB1 store para optimizar espacio
      */
     public void compactTDBStore() {
         if (!hasTriplestore || dataset == null) {
@@ -678,19 +664,18 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return;
         }
         
-        logger.info("TDB2 compaction not available in this version. Consider manual compaction if needed.");
-        logger.info("Current TDB2 stats: {}", getTDB2Stats());
+        logger.info("TDB1 compaction not available in this version. Consider manual compaction if needed.");
+        logger.info("Current TDB1 stats: {}", getTDB1Stats());
     }
     
     /**
-     * Obtener estadísticas del TDB2 store
+     * Obtener estadísticas del TDB1 store
      */
-    public TDB2Stats getTDB2Stats() {
+    public TDB1Stats getTDB1Stats() {
         if (!hasTriplestore || dataset == null) {
-            return new TDB2Stats(0);
+            return new TDB1Stats(0);
         }
         
-        // Verificar si ya hay una transacción activa
         boolean needsNewTransaction = !dataset.isInTransaction();
         
         if (needsNewTransaction) {
@@ -703,24 +688,19 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     dataset.getNamedModel(this.graph);
             
             long tripleCount = model.size();
-            
-            return new TDB2Stats(tripleCount);
+            return new TDB1Stats(tripleCount);
             
         } finally {
-            // Solo terminar la transacción si la creamos nosotros
             if (needsNewTransaction && dataset.isInTransaction()) {
                 dataset.end();
             }
         }
     }
     
-    /**
-     * Clase para estadísticas del TDB2 store
-     */
-    public static class TDB2Stats {
+    public static class TDB1Stats {
         private final long tripleCount;
         
-        public TDB2Stats(long tripleCount) {
+        public TDB1Stats(long tripleCount) {
             this.tripleCount = tripleCount;
         }
         
@@ -728,10 +708,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         
         @Override
         public String toString() {
-            return String.format("TDB2Stats{triples=%d}", tripleCount);
+            return String.format("TDB1Stats{triples=%d}", tripleCount);
         }
     }
-    
+
     public List<OutputConfig> getOutputsByType(List<OutputConfig> outputs, String type) {
         List<OutputConfig> outputConfigs = new ArrayList<>();
         if (outputs == null) return outputConfigs;
@@ -821,6 +801,299 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return createNameBasedId(occrValue);
         } else { 
             return createRandomId();
+        }
+    }
+
+    /**
+     * Writer for XML files (compartido entre TDB1 y TDB2).
+     */
+    private class XMLWriter extends AbstractWriter {
+        private final String filePath;
+        private final Map<String, String> namespaces;
+        private FileOutputStream fos;
+        private boolean headerWritten = false;
+        private final Object writeLock = new Object();
+
+        XMLWriter(BlockingQueue<Object> queue, OutputConfig config, Map<String, String> namespaces) throws IOException {
+            super(queue);
+            this.filePath = config.getPath() + config.getName();
+            this.namespaces = new HashMap<>(namespaces);
+            
+            java.io.File file = new java.io.File(this.filePath);
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
+            }
+            
+            boolean reset = "true".equalsIgnoreCase(config.getReset());
+            this.fos = new FileOutputStream(file, !reset);
+            
+            try {
+                if (fos.getChannel().position() > 0) {
+                    this.headerWritten = true;
+                }
+            } catch (IOException e) {
+                logger.warn("Could not check file position for {}", this.filePath, e);
+            }
+        }
+
+        @Override
+        protected void performWrite(List<RDFTripleData> batch) {
+            if (batch.isEmpty()) return;
+
+            synchronized (writeLock) {
+                try {
+                    if (!headerWritten && fos.getChannel().position() == 0) {
+                        writeXMLHeader();
+                        headerWritten = true;
+                    }
+
+                    // Convertir RDFTripleData a Statements para escribir XML
+                    Model batchModel = ModelFactory.createDefaultModel();
+                    for (RDFTripleData tripleData : batch) {
+                        Statement stmt = convertToStatement(batchModel, tripleData);
+                        if (stmt != null) {
+                            batchModel.add(stmt);
+                        }
+                    }
+
+                    StringWriter sw = new StringWriter();
+                    batchModel.write(sw, "RDF/XML-ABBREV");
+                    String body = extractXMLBody(sw.toString());
+                    if (body != null && !body.trim().isEmpty()) {
+                        fos.write(body.getBytes("UTF-8"));
+                        fos.flush();
+                        
+                        triplesWritten.addAndGet(batch.size());
+                        logger.debug("XMLWriter wrote {} triples to file: {}", batch.size(), filePath);
+                    }
+                } catch (IOException e) {
+                    logger.error("Failed to write batch to XML file: " + filePath, e);
+                }
+            }
+        }
+
+        private Statement convertToStatement(Model model, RDFTripleData tripleData) {
+            try {
+                Resource subject = model.createResource(tripleData.getSubjectUri());
+                Property predicate = model.createProperty(tripleData.getPredicateUri());
+                
+                RDFNode object;
+                if (tripleData.isObjectProperty()) {
+                    object = model.createResource(tripleData.getObjectValue());
+                } else {
+                    if (tripleData.getObjectDatatype() != null) {
+                        object = model.createTypedLiteral(tripleData.getObjectValue(), tripleData.getObjectDatatype());
+                    } else if (tripleData.getObjectLanguage() != null && !tripleData.getObjectLanguage().isEmpty()) {
+                        object = model.createLiteral(tripleData.getObjectValue(), tripleData.getObjectLanguage());
+                    } else {
+                        object = model.createLiteral(tripleData.getObjectValue());
+                    }
+                }
+                
+                return model.createStatement(subject, predicate, object);
+            } catch (Exception e) {
+                logger.error("Error converting RDFTripleData to Statement: {}", tripleData, e);
+                return null;
+            }
+        }
+
+        private void writeXMLHeader() throws IOException {
+            Model tempModel = ModelFactory.createDefaultModel();
+            tempModel.setNsPrefixes(this.namespaces);
+            StringWriter sw = new StringWriter();
+            tempModel.write(sw, "RDF/XML");
+            String header = sw.toString().replaceAll("</rdf:RDF>\\s*$", "");
+            fos.write(header.getBytes("UTF-8"));
+        }
+
+        @Override
+        public void close() throws IOException {
+            synchronized (writeLock) {
+                if (fos != null) {
+                    try {
+                        if (headerWritten) {
+                            fos.write("\n</rdf:RDF>".getBytes("UTF-8"));
+                        }
+                        fos.flush();
+                    } catch (IOException e) {
+                        logger.error("Error writing XML footer to file: " + filePath, e);
+                    } finally {
+                        try {
+                            fos.close();
+                        } catch (IOException e) {
+                            logger.error("Error closing file output stream for: " + filePath, e);
+                        }
+                        fos = null;
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Obtener estadísticas de procesamiento simplificadas
+     */
+    public ProcessingStats getProcessingStats() {
+        return new ProcessingStats(
+                tripleBuffer != null ? tripleBuffer.size() : 0,
+                bufferSize,
+                Math.max(0, activeIndexingPhaser.getRegisteredParties() - 1), // Restar el hilo principal
+                triplesProduced.get(),
+                triplesConsumed.get(),
+                triplesWritten.get(),
+                triplesDuplicated.get(),
+                concurrentTasksSemaphore.availablePermits(),
+                maxConcurrentTasks
+        );
+    }
+    
+    /**
+     * Clase para estadísticas de procesamiento (compartida entre TDB1 y TDB2)
+     */
+    public static class ProcessingStats {
+        private final int bufferSize;
+        private final int bufferCapacity;
+        private final int activeTasks;
+        private final long triplesProduced;
+        private final long triplesConsumed;
+        private final long triplesWritten;
+        private final long triplesDuplicated;
+        private final int availableSlots;
+        private final int maxSlots;
+
+        public ProcessingStats(int bufferSize, int bufferCapacity, int activeTasks, long triplesProduced, 
+                             long triplesConsumed, long triplesWritten, long triplesDuplicated, int availableSlots, int maxSlots) {
+            this.bufferSize = bufferSize;
+            this.bufferCapacity = bufferCapacity;
+            this.activeTasks = activeTasks;
+            this.triplesProduced = triplesProduced;
+            this.triplesConsumed = triplesConsumed;
+            this.triplesWritten = triplesWritten;
+            this.triplesDuplicated = triplesDuplicated;
+            this.availableSlots = availableSlots;
+            this.maxSlots = maxSlots;
+        }
+
+        public int getBufferSize() { return bufferSize; }
+        public int getBufferCapacity() { return bufferCapacity; }
+        public int getActiveTasks() { return Math.max(0, activeTasks); }
+        public long getTriplesProduced() { return triplesProduced; }
+        public long getTriplesConsumed() { return triplesConsumed; }
+        public long getTriplesWritten() { return triplesWritten; }
+        public long getTriplesDuplicated() { return triplesDuplicated; }
+        public int getAvailableSlots() { return availableSlots; }
+        public int getMaxSlots() { return maxSlots; }
+        public int getUsedSlots() { return maxSlots - availableSlots; }
+        public double getBufferUsagePercentage() {
+            return bufferCapacity > 0 ? (double) bufferSize * 100.0 / bufferCapacity : 0.0;
+        }
+        
+        public double getDuplicationPercentage() {
+            long totalProcessed = triplesProduced + triplesDuplicated;
+            return totalProcessed > 0 ? (double) triplesDuplicated * 100.0 / totalProcessed : 0.0;
+        }
+        
+        public long getTotalTriplesProcessed() {
+            return triplesProduced + triplesDuplicated;
+        }
+    }
+
+    @Override
+    public void close() throws IOException {
+        synchronized (flushLock) {
+            if (shutdown) {
+                return;
+            }
+            logger.info("Closing EntityIndexerTDB1ThreadedImpl...");
+            shutdown = true;
+
+            // 1. Wait for any running producers to finish
+            logger.info("Waiting for final indexing tasks to complete...");
+            int phase = activeIndexingPhaser.arrive();
+            try {
+                activeIndexingPhaser.awaitAdvanceInterruptibly(phase);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.warn("Interrupted while waiting for producers during close.", e);
+            }
+            logger.info("All indexing tasks finished.");
+
+            try {
+                // 2. Signal distributor and writers to shut down
+                logger.info("Signaling shutdown to distributor and writers...");
+                tripleBuffer.put(POISON_PILL);
+
+                // 3. Wait for distributor to finish
+                if (distributorThread != null) {
+                    distributorThread.join();
+                    logger.info("Distributor thread finished.");
+                }
+
+                // 4. Wait for all writer threads to finish
+                for (Thread writerThread : writerThreads) {
+                    writerThread.join();
+                }
+                logger.info("All writer threads finished.");
+
+                // 5. Close all writers
+                for (Closeable writer : writers) {
+                    try {
+                        writer.close();
+                    } catch (IOException e) {
+                        logger.error("Error closing writer", e);
+                    }
+                }
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Interrupted during indexer shutdown.", e);
+            } finally {
+                // 6. Shutdown executors - ESTO DETENDRÁ EL HILO DE MONITOREO
+                shutdownExecutor(indexingExecutor, "Indexing");
+                shutdownExecutor(utilityExecutor, "Utility"); // Este detiene el monitoring thread
+                
+                // 7. Close TDB1 dataset
+                if (hasTriplestore && dataset != null) {
+                    if (dataset.isInTransaction()) {
+                        logger.warn("Transaction was still active during close. Attempting to end.");
+                        dataset.end();
+                    }
+                    dataset.close();
+                    logger.info("TDB1 Dataset closed.");
+                }
+                logger.info("EntityIndexerTDB1ThreadedImpl closed successfully.");
+            }
+        }
+    }
+    
+    private void shutdownExecutor(ExecutorService executor, String name) {
+        if (executor != null) {
+            logger.debug("Shutting down {} executor", name);
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    logger.warn("{} executor did not terminate gracefully, forcing shutdown", name);
+                    List<Runnable> pending = executor.shutdownNow();
+                    logger.warn("{} pending tasks cancelled in {} executor.", pending.size(), name);
+                } else {
+                    logger.info("{} executor shutdown completed successfully", name);
+                }
+            } catch (InterruptedException e) {
+                logger.warn("Interrupted while waiting for {} executor termination", name);
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+    
+    /**
+     * Método para cerrar el indexer manualmente desde línea de comandos
+     */
+    public void shutdown() {
+        try {
+            close();
+        } catch (IOException e) {
+            logger.error("Error during manual shutdown", e);
         }
     }
 
@@ -1173,24 +1446,24 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     }
 
     /**
-     * Writer for TDB2 dataset - Opción 2: Modelo por writer para mejor rendimiento
+     * Writer for TDB1 dataset - Modelo por writer para mejor rendimiento
      */
-    private class TDBWriter extends AbstractWriter {
+    private class TDB1Writer extends AbstractWriter {
         private final Dataset tdbDataset;
         private final String graphName;
-        private final Model writerModel; // Modelo específico del writer
+        private final Model writerModel;
         private final Object tdbWriteLock = new Object();
 
-        TDBWriter(BlockingQueue<Object> queue, Dataset tdbDataset, String graphName) {
+        TDB1Writer(BlockingQueue<Object> queue, Dataset tdbDataset, String graphName) {
             super(queue);
             this.tdbDataset = tdbDataset;
             this.graphName = graphName;
-            // Crear modelo una vez por writer para mejor rendimiento
+            // Crear modelo una vez por writer
             this.writerModel = (graphName != null && !graphName.isEmpty()) ?
                     tdbDataset.getNamedModel(graphName) :
                     tdbDataset.getDefaultModel();
             
-            logger.debug("TDBWriter initialized with dedicated model for graph: {}", 
+            logger.debug("TDB1Writer initialized with dedicated model for graph: {}", 
                         graphName != null ? graphName : "default");
         }
 
@@ -1201,11 +1474,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             synchronized (tdbWriteLock) {
                 boolean transactionStarted = false;
                 try {
+                    // TDB1 usa el mismo patrón de transacciones que TDB2
                     tdbDataset.begin(ReadWrite.WRITE);
                     transactionStarted = true;
 
-                    // Usar el modelo pre-creado del writer (más eficiente)
-                    // Convertir RDFTripleData a Statements solo al momento de persistir
                     List<Statement> statements = new ArrayList<>(batch.size());
                     for (RDFTripleData tripleData : batch) {
                         Statement stmt = convertToStatement(writerModel, tripleData);
@@ -1214,22 +1486,20 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                         }
                     }
 
-                    // Añadir todas las statements al modelo
                     writerModel.add(statements);
-
                     tdbDataset.commit();
                     transactionStarted = false;
 
                     triplesWritten.addAndGet(batch.size());
-                    logger.debug("TDBWriter completed writing a batch of {} triples to TDB2.", batch.size());
+                    logger.debug("TDB1Writer completed writing a batch of {} triples to TDB1.", batch.size());
 
                 } catch (Exception e) {
-                    logger.error("Error writing batch to TDB2 dataset: {}", e.getMessage(), e);
+                    logger.error("Error writing batch to TDB1 dataset: {}", e.getMessage(), e);
                     if (transactionStarted && tdbDataset.isInTransaction()) {
                         try {
                             tdbDataset.abort();
                         } catch (Exception abortEx) {
-                            logger.error("Error aborting TDB2 transaction", abortEx);
+                            logger.error("Error aborting TDB1 transaction", abortEx);
                         }
                     }
                 } finally {
@@ -1237,7 +1507,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                         try {
                             tdbDataset.end();
                         } catch (Exception endEx) {
-                            logger.error("Error ending TDB2 transaction", endEx);
+                            logger.error("Error ending TDB1 transaction", endEx);
                         }
                     }
                 }
@@ -1245,6 +1515,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         }
 
         private Statement convertToStatement(Model model, RDFTripleData tripleData) {
+            // Método idéntico al de TDB2
             try {
                 Resource subject = model.createResource(tripleData.getSubjectUri());
                 Property predicate = model.createProperty(tripleData.getPredicateUri());
@@ -1253,7 +1524,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 if (tripleData.isObjectProperty()) {
                     object = model.createResource(tripleData.getObjectValue());
                 } else {
-                    // Es literal
                     if (tripleData.getObjectDatatype() != null) {
                         object = model.createTypedLiteral(tripleData.getObjectValue(), tripleData.getObjectDatatype());
                     } else if (tripleData.getObjectLanguage() != null && !tripleData.getObjectLanguage().isEmpty()) {
@@ -1273,307 +1543,8 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         @Override
         public void close() {
             synchronized (tdbWriteLock) {
-                logger.info("TDBWriter closed");
-                // TDB dataset is closed centrally, nothing to do here.
-                // writerModel will be cleaned up with the dataset
+                logger.info("TDB1Writer closed");
             }
-        }
-    }
-
-    /**
-     * Writer for XML files.
-     */
-    private class XMLWriter extends AbstractWriter {
-        private final String filePath;
-        private final Map<String, String> namespaces;
-        private FileOutputStream fos;
-        private boolean headerWritten = false;
-        private final Object writeLock = new Object();
-
-        XMLWriter(BlockingQueue<Object> queue, OutputConfig config, Map<String, String> namespaces) throws IOException {
-            super(queue);
-            this.filePath = config.getPath() + config.getName();
-            this.namespaces = new HashMap<>(namespaces);
-            
-            java.io.File file = new java.io.File(this.filePath);
-            if (file.getParentFile() != null) {
-                file.getParentFile().mkdirs();
-            }
-            
-            boolean reset = "true".equalsIgnoreCase(config.getReset());
-            this.fos = new FileOutputStream(file, !reset);
-            
-            try {
-                if (fos.getChannel().position() > 0) {
-                    this.headerWritten = true;
-                }
-            } catch (IOException e) {
-                logger.warn("Could not check file position for {}", this.filePath, e);
-            }
-        }
-
-        @Override
-        protected void performWrite(List<RDFTripleData> batch) {
-            if (batch.isEmpty()) return;
-
-            synchronized (writeLock) {
-                try {
-                    if (!headerWritten && fos.getChannel().position() == 0) {
-                        writeXMLHeader();
-                        headerWritten = true;
-                    }
-
-                    // Convertir RDFTripleData a Statements para escribir XML
-                    Model batchModel = ModelFactory.createDefaultModel();
-                    for (RDFTripleData tripleData : batch) {
-                        Statement stmt = convertToStatement(batchModel, tripleData);
-                        if (stmt != null) {
-                            batchModel.add(stmt);
-                        }
-                    }
-
-                    StringWriter sw = new StringWriter();
-                    batchModel.write(sw, "RDF/XML-ABBREV");
-                    String body = extractXMLBody(sw.toString());
-                    if (body != null && !body.trim().isEmpty()) {
-                        fos.write(body.getBytes("UTF-8"));
-                        fos.flush();
-                        
-                        triplesWritten.addAndGet(batch.size());
-                        logger.debug("XMLWriter wrote {} triples to file: {}", batch.size(), filePath);
-                    }
-                } catch (IOException e) {
-                    logger.error("Failed to write batch to XML file: " + filePath, e);
-                }
-            }
-        }
-
-        private Statement convertToStatement(Model model, RDFTripleData tripleData) {
-            try {
-                Resource subject = model.createResource(tripleData.getSubjectUri());
-                Property predicate = model.createProperty(tripleData.getPredicateUri());
-                
-                RDFNode object;
-                if (tripleData.isObjectProperty()) {
-                    object = model.createResource(tripleData.getObjectValue());
-                } else {
-                    if (tripleData.getObjectDatatype() != null) {
-                        object = model.createTypedLiteral(tripleData.getObjectValue(), tripleData.getObjectDatatype());
-                    } else if (tripleData.getObjectLanguage() != null && !tripleData.getObjectLanguage().isEmpty()) {
-                        object = model.createLiteral(tripleData.getObjectValue(), tripleData.getObjectLanguage());
-                    } else {
-                        object = model.createLiteral(tripleData.getObjectValue());
-                    }
-                }
-                
-                return model.createStatement(subject, predicate, object);
-            } catch (Exception e) {
-                logger.error("Error converting RDFTripleData to Statement: {}", tripleData, e);
-                return null;
-            }
-        }
-
-        private void writeXMLHeader() throws IOException {
-            Model tempModel = ModelFactory.createDefaultModel();
-            tempModel.setNsPrefixes(this.namespaces);
-            StringWriter sw = new StringWriter();
-            tempModel.write(sw, "RDF/XML");
-            String header = sw.toString().replaceAll("</rdf:RDF>\\s*$", "");
-            fos.write(header.getBytes("UTF-8"));
-        }
-
-        @Override
-        public void close() throws IOException {
-            synchronized (writeLock) {
-                if (fos != null) {
-                    try {
-                        if (headerWritten) {
-                            fos.write("\n</rdf:RDF>".getBytes("UTF-8"));
-                        }
-                        fos.flush();
-                    } catch (IOException e) {
-                        logger.error("Error writing XML footer to file: " + filePath, e);
-                    } finally {
-                        try {
-                            fos.close();
-                        } catch (IOException e) {
-                            logger.error("Error closing file output stream for: " + filePath, e);
-                        }
-                        fos = null;
-                    }
-                }
-            }
-        }
-    }
-    
-    /**
-     * Obtener estadísticas de procesamiento simplificadas
-     */
-    public ProcessingStats getProcessingStats() {
-        return new ProcessingStats(
-                tripleBuffer != null ? tripleBuffer.size() : 0,
-                bufferSize,
-                Math.max(0, activeIndexingPhaser.getRegisteredParties() - 1), // Restar el hilo principal
-                triplesProduced.get(),
-                triplesConsumed.get(),
-                triplesWritten.get(),
-                triplesDuplicated.get(),
-                concurrentTasksSemaphore.availablePermits(),
-                maxConcurrentTasks
-        );
-    }
-    
-    /**
-     * Clase para estadísticas de procesamiento
-     */
-    public static class ProcessingStats {
-        private final int bufferSize;
-        private final int bufferCapacity;
-        private final int activeTasks;
-        private final long triplesProduced;
-        private final long triplesConsumed;
-        private final long triplesWritten;
-        private final long triplesDuplicated;
-        private final int availableSlots;
-        private final int maxSlots;
-
-        public ProcessingStats(int bufferSize, int bufferCapacity, int activeTasks, long triplesProduced, 
-                             long triplesConsumed, long triplesWritten, long triplesDuplicated, int availableSlots, int maxSlots) {
-            this.bufferSize = bufferSize;
-            this.bufferCapacity = bufferCapacity;
-            this.activeTasks = activeTasks;
-            this.triplesProduced = triplesProduced;
-            this.triplesConsumed = triplesConsumed;
-            this.triplesWritten = triplesWritten;
-            this.triplesDuplicated = triplesDuplicated;
-            this.availableSlots = availableSlots;
-            this.maxSlots = maxSlots;
-        }
-
-        public int getBufferSize() { return bufferSize; }
-        public int getBufferCapacity() { return bufferCapacity; }
-        public int getActiveTasks() { return Math.max(0, activeTasks); }
-        public long getTriplesProduced() { return triplesProduced; }
-        public long getTriplesConsumed() { return triplesConsumed; }
-        public long getTriplesWritten() { return triplesWritten; }
-        public long getTriplesDuplicated() { return triplesDuplicated; }
-        public int getAvailableSlots() { return availableSlots; }
-        public int getMaxSlots() { return maxSlots; }
-        public int getUsedSlots() { return maxSlots - availableSlots; }
-        public double getBufferUsagePercentage() {
-            return bufferCapacity > 0 ? (double) bufferSize * 100.0 / bufferCapacity : 0.0;
-        }
-        
-        /**
-         * Calcula el porcentaje de triples duplicados del total procesado
-         */
-        public double getDuplicationPercentage() {
-            long totalProcessed = triplesProduced + triplesDuplicated;
-            return totalProcessed > 0 ? (double) triplesDuplicated * 100.0 / totalProcessed : 0.0;
-        }
-        
-        /**
-         * Obtiene el total de triples procesados (únicos + duplicados)
-         */
-        public long getTotalTriplesProcessed() {
-            return triplesProduced + triplesDuplicated;
-        }
-    }
-
-    @Override
-    public void close() throws IOException {
-        synchronized (flushLock) {
-            if (shutdown) {
-                return;
-            }
-            logger.info("Closing EntityIndexerTDB2ThreadedImpl...");
-            shutdown = true;
-
-            // 1. Wait for any running producers to finish
-            logger.info("Waiting for final indexing tasks to complete...");
-            int phase = activeIndexingPhaser.arrive();
-            try {
-                activeIndexingPhaser.awaitAdvanceInterruptibly(phase);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.warn("Interrupted while waiting for producers during close.", e);
-            }
-            logger.info("All indexing tasks finished.");
-
-            try {
-                // 2. Signal distributor and writers to shut down
-                logger.info("Signaling shutdown to distributor and writers...");
-                tripleBuffer.put(POISON_PILL);
-
-                // 3. Wait for distributor to finish
-                if (distributorThread != null) {
-                    distributorThread.join();
-                    logger.info("Distributor thread finished.");
-                }
-
-                // 4. Wait for all writer threads to finish
-                for (Thread writerThread : writerThreads) {
-                    writerThread.join();
-                }
-                logger.info("All writer threads finished.");
-
-                // 5. Close all writers
-                for (Closeable writer : writers) {
-                    try {
-                        writer.close();
-                    } catch (IOException e) {
-                        logger.error("Error closing writer", e);
-                    }
-                }
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.error("Interrupted during indexer shutdown.", e);
-            } finally {
-                shutdownExecutor(indexingExecutor, "Indexing");
-                shutdownExecutor(utilityExecutor, "Utility"); //
-                // 7. Close TDB dataset
-                if (hasTriplestore && dataset != null) {
-                    if (dataset.isInTransaction()) {
-                        logger.warn("Transaction was still active during close. Attempting to end.");
-                        dataset.end();
-                    }
-                    dataset.close();
-                    logger.info("TDB2 Dataset closed.");
-                }
-                logger.info("EntityIndexerTDB2ThreadedImpl closed successfully.");
-            }
-        }
-    }
-    
-    private void shutdownExecutor(ExecutorService executor, String name) {
-        if (executor != null) {
-            logger.debug("Shutting down {} executor", name);
-            executor.shutdown();
-            try {
-                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    logger.warn("{} executor did not terminate gracefully, forcing shutdown", name);
-                    List<Runnable> pending = executor.shutdownNow();
-                    logger.warn("{} pending tasks cancelled in {} executor.", pending.size(), name);
-                } else {
-                    logger.info("{} executor shutdown completed successfully", name);
-                }
-            } catch (InterruptedException e) {
-                logger.warn("Interrupted while waiting for {} executor termination", name);
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-    
-    /**
-     * Método para cerrar el indexer manualmente desde línea de comandos
-     */
-    public void shutdown() {
-        try {
-            close();
-        } catch (IOException e) {
-            logger.error("Error during manual shutdown", e);
         }
     }
 }
