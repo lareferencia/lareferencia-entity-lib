@@ -153,7 +153,11 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
     private final AtomicLong triplesConsumed = new AtomicLong(0);
     private final AtomicLong triplesWritten = new AtomicLong(0);
     private final AtomicLong triplesDuplicated = new AtomicLong(0);
-    private final Set<String> seenTriples = ConcurrentHashMap.newKeySet();
+    
+    // Optimización de memoria: usar LRU cache en lugar de Set ilimitado
+    private final Map<String, Boolean> seenTriples = new ConcurrentHashMap<>();
+    private final int maxSeenTriplesCache = 1000000; // Máximo 1M triples en cache
+    private final AtomicLong seenTriplesEvictions = new AtomicLong(0);
     
     public EntityIndexerTDB1ThreadedImpl() {
         // Constructor
@@ -280,7 +284,13 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
                     if (!shutdown) { // Re-check after sleep
                         ProcessingStats stats = getProcessingStats();
                         TDB1Stats tdbStats = getTDB1Stats();
-                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB1: {}",
+                        
+                        // Log memoria cada cierto tiempo para monitorear
+                        Runtime runtime = Runtime.getRuntime();
+                        long usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024;
+                        long maxMemory = runtime.maxMemory() / 1024 / 1024;
+                        
+                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB1: {}. Cache: {}. Memory: {}MB/{}MB",
                                 stats.getBufferSize(),
                                 stats.getBufferCapacity(),
                                 String.format("%.2f", stats.getBufferUsagePercentage()),
@@ -293,7 +303,10 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
                                 stats.getTriplesDuplicated(),
                                 String.format("%.2f", stats.getDuplicationPercentage()),
                                 stats.getTotalTriplesProcessed(),
-                                tdbStats.toString()
+                                tdbStats.toString(),
+                                seenTriples.size(),
+                                usedMemory,
+                                maxMemory
                         );
                     }
                 } catch (InterruptedException e) {
@@ -593,10 +606,39 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
             );
             logger.info("Note: Duplicate statistics are approximated. TDB1 performs final deduplication during storage.");
             
-            // NO shutdown el indexer - solo hacer flush
-            // El indexer debe seguir funcionando para procesar más entidades
+            // DECISIÓN: Limpiar cache después del flush para liberar memoria
+            // Pros: Libera memoria significativa entre páginas
+            // Contras: Pierde información de deduplicación entre páginas (pero TDB1 deduplica automáticamente)
+            clearSeenTriplesCache();
+            logger.info("Cache cleared after flush to free memory for next processing batch.");
+            
             logger.info("Indexer remains active and ready for more processing.");
         }
+    }
+    
+    /**
+     * Limpiar el cache de triples vistos para liberar memoria
+     */
+    private void clearSeenTriplesCache() {
+        int sizeBefore = seenTriples.size();
+        seenTriples.clear();
+        logger.info("Cleared seen triples cache. Freed {} entries from memory.", sizeBefore);
+        
+        // Forzar garbage collection
+        System.gc();
+        
+        // Log memoria disponible
+        Runtime runtime = Runtime.getRuntime();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        long maxMemory = runtime.maxMemory();
+        
+        logger.info("Memory status after cache clear - Used: {}MB, Free: {}MB, Total: {}MB, Max: {}MB", 
+                   usedMemory / 1024 / 1024, 
+                   freeMemory / 1024 / 1024,
+                   totalMemory / 1024 / 1024,
+                   maxMemory / 1024 / 1024);
     }
 
     private String extractXMLBody(String rdfxml) {
@@ -1279,7 +1321,7 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
             if (subjectTypeUri != null) {
                 RDFTripleData typeTriple = RDFTripleData.createObjectProperty(subjectUri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", subjectTypeUri);
                 
-                if (seenTriples.add(typeTriple.getTripleHash())) {
+                if (addToSeenTriplesCache(typeTriple.getTripleHash())) {
                     tripleBuffer.put(typeTriple);
                     triplesProduced.incrementAndGet();
                 } else {
@@ -1292,7 +1334,7 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
             if (OBJECT_PROPERTY.equals(predicateType) && objectTypeUri != null) {
                 RDFTripleData objectTypeTriple = RDFTripleData.createObjectProperty(objectValue, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", objectTypeUri);
                 
-                if (seenTriples.add(objectTypeTriple.getTripleHash())) {
+                if (addToSeenTriplesCache(objectTypeTriple.getTripleHash())) {
                     tripleBuffer.put(objectTypeTriple);
                     triplesProduced.incrementAndGet();
                 } else {
@@ -1311,7 +1353,7 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
                 mainTriple = RDFTripleData.createLiteral(subjectUri, predicateUri, objectValue);
             }
             
-            if (seenTriples.add(mainTriple.getTripleHash())) {
+            if (addToSeenTriplesCache(mainTriple.getTripleHash())) {
                 tripleBuffer.put(mainTriple);
                 triplesProduced.incrementAndGet();
                 logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
@@ -1326,6 +1368,32 @@ public class EntityIndexerTDB1ThreadedImpl implements IEntityIndexer, Closeable 
         }
     }
     
+    /**
+     * Agregar hash de triple al cache con gestión de memoria
+     * @param tripleHash El hash de la triple
+     * @return true si es la primera vez que se ve esta triple, false si es duplicada
+     */
+    private boolean addToSeenTriplesCache(String tripleHash) {
+        // Si el cache está muy lleno, limpiar algunas entradas más antiguas
+        if (seenTriples.size() > maxSeenTriplesCache) {
+            // Remover aproximadamente 10% de las entradas más antiguas
+            int toRemove = maxSeenTriplesCache / 10;
+            int removed = 0;
+            
+            for (String key : seenTriples.keySet()) {
+                if (removed >= toRemove) break;
+                seenTriples.remove(key);
+                removed++;
+            }
+            
+            seenTriplesEvictions.addAndGet(removed);
+            logger.debug("Evicted {} entries from seen triples cache to free memory", removed);
+        }
+        
+        // Verificar si ya existe y agregarlo si es nuevo
+        return seenTriples.putIfAbsent(tripleHash, Boolean.TRUE) == null;
+    }
+
     /**
      * The Distributor thread takes items from the main buffer and distributes them
      * to all output queues.
