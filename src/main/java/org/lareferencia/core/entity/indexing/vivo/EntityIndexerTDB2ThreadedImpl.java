@@ -34,6 +34,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -52,7 +53,6 @@ import org.apache.jena.rdf.model.RDFNode;
 import org.apache.jena.rdf.model.Resource;
 import org.apache.jena.rdf.model.Statement;
 import org.apache.jena.tdb2.TDB2Factory;
-import org.apache.jena.vocabulary.RDF;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.lareferencia.core.entity.domain.Entity;
@@ -128,7 +128,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private ExecutorService indexingExecutor; // For producers
     private ExecutorService utilityExecutor; // For monitoring
     
-    private BlockingQueue<Object> tripleBuffer; // Main input queue for Statements, FlushMarkers, POISON_PILL
+    private BlockingQueue<Object> tripleBuffer; // Main input queue for RDFTripleData, FlushMarkers, POISON_PILL
     private final List<BlockingQueue<Object>> outputQueues = new ArrayList<>();
     private final List<Thread> writerThreads = new ArrayList<>();
     private Thread distributorThread;
@@ -151,6 +151,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private final AtomicLong triplesProduced = new AtomicLong(0);
     private final AtomicLong triplesConsumed = new AtomicLong(0); // Now represents triples consumed by distributor
     private final AtomicLong triplesWritten = new AtomicLong(0); // Total triples written by all writers
+    private final AtomicLong triplesDuplicated = new AtomicLong(0); // Triples that would be duplicated
+    
+    // Para tracking de duplicados - usando un Set thread-safe con hash de triples
+    private final Set<String> seenTriples = ConcurrentHashMap.newKeySet();
     
     
     public EntityIndexerTDB2ThreadedImpl() {
@@ -229,11 +233,12 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         }
     }
     
+    private Model globalModel; // Modelo global
+
     private void initializeThreading() {
         this.tripleBuffer = new LinkedBlockingQueue<>(bufferSize);
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
         this.utilityExecutor = Executors.newSingleThreadExecutor(); // For monitoring
-        
         
         // Inicializar semáforo para limitar tareas concurrentes
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
@@ -277,6 +282,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         
         logger.info("Threading initialized with {} indexing threads, max {} concurrent tasks, 1 distributor, and {} writers.", 
                    indexingThreads, maxConcurrentTasks, writerThreads.size());
+        logger.info("Duplicate detection enabled - statistics are approximated as TDB2 handles final deduplication.");
     }
     
     private void startMonitoringThread() {
@@ -288,7 +294,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     if (!shutdown) { // Re-check after sleep
                         ProcessingStats stats = getProcessingStats();
                         TDB2Stats tdbStats = getTDB2Stats();
-                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}. TDB2: {}",
+                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB2: {}",
                                 stats.getBufferSize(),
                                 stats.getBufferCapacity(),
                                 String.format("%.2f", stats.getBufferUsagePercentage()),
@@ -298,6 +304,9 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                                 stats.getTriplesProduced(),
                                 stats.getTriplesConsumed(),
                                 stats.getTriplesWritten(),
+                                stats.getTriplesDuplicated(),
+                                String.format("%.2f", stats.getDuplicationPercentage()),
+                                stats.getTotalTriplesProcessed(),
                                 tdbStats.toString()
                         );
                     }
@@ -586,6 +595,21 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 logger.error("Flush was interrupted while waiting for writers.", e);
             }
             logger.info("Flush operation completed successfully.");
+            
+            // Log final statistics but DON'T shutdown the indexer
+            ProcessingStats finalStats = getProcessingStats();
+            logger.info("[FLUSH STATS] Total triples processed: {}, Unique: {}, Duplicated: {} ({}%), Written: {}",
+                    finalStats.getTotalTriplesProcessed(),
+                    finalStats.getTriplesProduced(),
+                    finalStats.getTriplesDuplicated(),
+                    String.format("%.2f", finalStats.getDuplicationPercentage()),
+                    finalStats.getTriplesWritten()
+            );
+            logger.info("Note: Duplicate statistics are approximated. TDB2 performs final deduplication during storage.");
+            
+            // NO shutdown el indexer - solo hacer flush
+            // El indexer debe seguir funcionando para procesar más entidades
+            logger.info("Indexer remains active and ready for more processing.");
         }
     }
 
@@ -666,7 +690,13 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return new TDB2Stats(0);
         }
         
-        dataset.begin(ReadWrite.READ);
+        // Verificar si ya hay una transacción activa
+        boolean needsNewTransaction = !dataset.isInTransaction();
+        
+        if (needsNewTransaction) {
+            dataset.begin(ReadWrite.READ);
+        }
+        
         try {
             Model model = (this.graph == null || this.graph.isEmpty()) ?
                     dataset.getDefaultModel() :
@@ -677,7 +707,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return new TDB2Stats(tripleCount);
             
         } finally {
-            dataset.end();
+            // Solo terminar la transacción si la creamos nosotros
+            if (needsNewTransaction && dataset.isInTransaction()) {
+                dataset.end();
+            }
         }
     }
     
@@ -968,43 +1001,51 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             return;
         }
 
-        // Usar un modelo temporal y efímero para crear los objetos Statement.
-        // Esto elimina la necesidad de un modelo compartido y su bloqueo asociado, simplificando la concurrencia.
-        // TDB2 se encargará de la deduplicación de triples al momento de la escritura.
-        Model factoryModel = ModelFactory.createDefaultModel();
-
         try {
-            Resource subject = factoryModel.createResource(subjectUri);
-            Property predicate = factoryModel.createProperty(predicateUri);
-            RDFNode object;
-
-            // 1. Agregar la declaración de tipo para el sujeto (si aplica)
+            // 1. Crear y enviar triple para declaración de tipo del sujeto (si aplica)
             if (subjectTypeUri != null) {
-                Resource typeResource = factoryModel.createResource(subjectTypeUri);
-                Statement typeStatement = factoryModel.createStatement(subject, RDF.type, typeResource);
-                tripleBuffer.put(typeStatement);
-                triplesProduced.incrementAndGet();
-            }
-
-            // 2. Crear el objeto y su declaración de tipo (si aplica)
-            if (OBJECT_PROPERTY.equals(predicateType)) {
-                object = factoryModel.createResource(objectValue);
-                if (objectTypeUri != null) {
-                    Resource objectTypeResource = factoryModel.createResource(objectTypeUri);
-                    Statement objectTypeStatement = factoryModel.createStatement((Resource) object, RDF.type, objectTypeResource);
-                    tripleBuffer.put(objectTypeStatement);
+                RDFTripleData typeTriple = RDFTripleData.createObjectProperty(subjectUri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", subjectTypeUri);
+                
+                if (seenTriples.add(typeTriple.getTripleHash())) {
+                    tripleBuffer.put(typeTriple);
                     triplesProduced.incrementAndGet();
+                } else {
+                    triplesDuplicated.incrementAndGet();
+                    logger.debug("Duplicate type triple detected: S={}, P={}, O={}", subjectUri, "rdf:type", subjectTypeUri);
                 }
-            } else {
-                object = factoryModel.createLiteral(objectValue);
             }
 
-            // 3. Crear y encolar la triple principal
-            Statement mainStatement = factoryModel.createStatement(subject, predicate, object);
-            tripleBuffer.put(mainStatement);
-            triplesProduced.incrementAndGet();
+            // 2. Crear y enviar triple para declaración de tipo del objeto (si aplica)
+            if (OBJECT_PROPERTY.equals(predicateType) && objectTypeUri != null) {
+                RDFTripleData objectTypeTriple = RDFTripleData.createObjectProperty(objectValue, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", objectTypeUri);
+                
+                if (seenTriples.add(objectTypeTriple.getTripleHash())) {
+                    tripleBuffer.put(objectTypeTriple);
+                    triplesProduced.incrementAndGet();
+                } else {
+                    triplesDuplicated.incrementAndGet();
+                    logger.debug("Duplicate object type triple detected: S={}, P={}, O={}", objectValue, "rdf:type", objectTypeUri);
+                }
+            }
+
+            // 3. Crear y enviar la triple principal
+            RDFTripleData mainTriple;
+            if (OBJECT_PROPERTY.equals(predicateType)) {
+                // Object property - objeto es URI
+                mainTriple = RDFTripleData.createObjectProperty(subjectUri, predicateUri, objectValue);
+            } else {
+                // Data property - objeto es literal
+                mainTriple = RDFTripleData.createLiteral(subjectUri, predicateUri, objectValue);
+            }
             
-            logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
+            if (seenTriples.add(mainTriple.getTripleHash())) {
+                tripleBuffer.put(mainTriple);
+                triplesProduced.incrementAndGet();
+                logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
+            } else {
+                triplesDuplicated.incrementAndGet();
+                logger.debug("Duplicate triple detected: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
+            }
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -1012,6 +1053,433 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         }
     }
     
+    /**
+     * The Distributor thread takes items from the main buffer and distributes them
+     * to all output queues.
+     */
+    private class Distributor implements Runnable {
+        @Override
+        public void run() {
+            logger.info("Distributor thread started.");
+            try {
+                while (!shutdown) {
+                    Object item = tripleBuffer.take();
+                    
+                    if (item instanceof RDFTripleData) {
+                        triplesConsumed.incrementAndGet();
+                    }
+
+                    if (item == POISON_PILL) {
+                        logger.info("Distributor received POISON_PILL. Forwarding to writers.");
+                        for (BlockingQueue<Object> queue : outputQueues) {
+                            queue.put(POISON_PILL);
+                        }
+                        break; // Exit run loop
+                    }
+
+                    // Distribute to all output queues
+                    for (BlockingQueue<Object> queue : outputQueues) {
+                        queue.put(item);
+                    }
+                }
+            } catch (InterruptedException e) {
+                if (!shutdown) {
+                    logger.error("Distributor thread was interrupted.", e);
+                }
+                Thread.currentThread().interrupt();
+            }
+            logger.info("Distributor thread is shutting down.");
+        }
+    }
+
+    /**
+     * Abstract base class for writer threads.
+     */
+    private abstract class AbstractWriter implements Runnable, Closeable {
+        protected final BlockingQueue<Object> queue;
+        protected final List<RDFTripleData> localBuffer;
+        protected final int batchSize = 250;
+        protected final long maxWaitTimeMs = 1000;
+
+        protected AbstractWriter(BlockingQueue<Object> queue) {
+            this.queue = queue;
+            this.localBuffer = new ArrayList<>(batchSize);
+        }
+
+        @Override
+        public void run() {
+            logger.info("{} started.", this.getClass().getSimpleName());
+            long lastWriteTime = System.currentTimeMillis();
+            
+            try {
+                while (true) {
+                    Object item = queue.poll(500, TimeUnit.MILLISECONDS);
+                    
+                    if (item != null) {
+                        if (item instanceof RDFTripleData) {
+                            localBuffer.add((RDFTripleData) item);
+                            
+                            if (localBuffer.size() >= batchSize || 
+                                (System.currentTimeMillis() - lastWriteTime) > maxWaitTimeMs) {
+                                writeBatch();
+                                lastWriteTime = System.currentTimeMillis();
+                            }
+                        } else if (item instanceof FlushMarker) {
+                            writeBatch();
+                            lastWriteTime = System.currentTimeMillis();
+                            ((FlushMarker) item).latch.countDown();
+                        } else if (item == POISON_PILL) {
+                            writeBatch();
+                            break;
+                        }
+                    } else {
+                        if (!localBuffer.isEmpty() && 
+                            (System.currentTimeMillis() - lastWriteTime) > maxWaitTimeMs) {
+                            writeBatch();
+                            lastWriteTime = System.currentTimeMillis();
+                        }
+                    }
+                }
+            } catch (InterruptedException e) {
+                if (!shutdown) {
+                    logger.error("Writer thread was interrupted.", e);
+                }
+                Thread.currentThread().interrupt();
+            } finally {
+                if (!localBuffer.isEmpty()) {
+                    logger.warn("Writing remaining {} triples from local buffer on thread exit.", localBuffer.size());
+                    writeBatch();
+                }
+                logger.info("{} is shutting down.", this.getClass().getSimpleName());
+            }
+        }
+
+        private void writeBatch() {
+            if (localBuffer.isEmpty()) {
+                return;
+            }
+            int batchSizeToWrite = localBuffer.size();
+            try {
+                performWrite(new ArrayList<>(localBuffer));
+                logger.debug("{} wrote batch of {} triples", this.getClass().getSimpleName(), batchSizeToWrite);
+            } catch (Exception e) {
+                logger.error("Error writing batch in {}", this.getClass().getSimpleName(), e);
+            } finally {
+                localBuffer.clear();
+            }
+        }
+
+        protected abstract void performWrite(List<RDFTripleData> batch);
+    }
+
+    /**
+     * Writer for TDB2 dataset - Opción 2: Modelo por writer para mejor rendimiento
+     */
+    private class TDBWriter extends AbstractWriter {
+        private final Dataset tdbDataset;
+        private final String graphName;
+        private final Model writerModel; // Modelo específico del writer
+        private final Object tdbWriteLock = new Object();
+
+        TDBWriter(BlockingQueue<Object> queue, Dataset tdbDataset, String graphName) {
+            super(queue);
+            this.tdbDataset = tdbDataset;
+            this.graphName = graphName;
+            // Crear modelo una vez por writer para mejor rendimiento
+            this.writerModel = (graphName != null && !graphName.isEmpty()) ?
+                    tdbDataset.getNamedModel(graphName) :
+                    tdbDataset.getDefaultModel();
+            
+            logger.debug("TDBWriter initialized with dedicated model for graph: {}", 
+                        graphName != null ? graphName : "default");
+        }
+
+        @Override
+        protected void performWrite(List<RDFTripleData> batch) {
+            if (tdbDataset == null || !hasTriplestore || batch.isEmpty()) return;
+
+            synchronized (tdbWriteLock) {
+                boolean transactionStarted = false;
+                try {
+                    tdbDataset.begin(ReadWrite.WRITE);
+                    transactionStarted = true;
+
+                    // Usar el modelo pre-creado del writer (más eficiente)
+                    // Convertir RDFTripleData a Statements solo al momento de persistir
+                    List<Statement> statements = new ArrayList<>(batch.size());
+                    for (RDFTripleData tripleData : batch) {
+                        Statement stmt = convertToStatement(writerModel, tripleData);
+                        if (stmt != null) {
+                            statements.add(stmt);
+                        }
+                    }
+
+                    // Añadir todas las statements al modelo
+                    writerModel.add(statements);
+
+                    tdbDataset.commit();
+                    transactionStarted = false;
+
+                    triplesWritten.addAndGet(batch.size());
+                    logger.debug("TDBWriter completed writing a batch of {} triples to TDB2.", batch.size());
+
+                } catch (Exception e) {
+                    logger.error("Error writing batch to TDB2 dataset: {}", e.getMessage(), e);
+                    if (transactionStarted && tdbDataset.isInTransaction()) {
+                        try {
+                            tdbDataset.abort();
+                        } catch (Exception abortEx) {
+                            logger.error("Error aborting TDB2 transaction", abortEx);
+                        }
+                    }
+                } finally {
+                    if (transactionStarted && tdbDataset.isInTransaction()) {
+                        try {
+                            tdbDataset.end();
+                        } catch (Exception endEx) {
+                            logger.error("Error ending TDB2 transaction", endEx);
+                        }
+                    }
+                }
+            }
+        }
+
+        private Statement convertToStatement(Model model, RDFTripleData tripleData) {
+            try {
+                Resource subject = model.createResource(tripleData.getSubjectUri());
+                Property predicate = model.createProperty(tripleData.getPredicateUri());
+                
+                RDFNode object;
+                if (tripleData.isObjectProperty()) {
+                    object = model.createResource(tripleData.getObjectValue());
+                } else {
+                    // Es literal
+                    if (tripleData.getObjectDatatype() != null) {
+                        object = model.createTypedLiteral(tripleData.getObjectValue(), tripleData.getObjectDatatype());
+                    } else if (tripleData.getObjectLanguage() != null && !tripleData.getObjectLanguage().isEmpty()) {
+                        object = model.createLiteral(tripleData.getObjectValue(), tripleData.getObjectLanguage());
+                    } else {
+                        object = model.createLiteral(tripleData.getObjectValue());
+                    }
+                }
+                
+                return model.createStatement(subject, predicate, object);
+            } catch (Exception e) {
+                logger.error("Error converting RDFTripleData to Statement: {}", tripleData, e);
+                return null;
+            }
+        }
+
+        @Override
+        public void close() {
+            synchronized (tdbWriteLock) {
+                logger.info("TDBWriter closed");
+                // TDB dataset is closed centrally, nothing to do here.
+                // writerModel will be cleaned up with the dataset
+            }
+        }
+    }
+
+    /**
+     * Writer for XML files.
+     */
+    private class XMLWriter extends AbstractWriter {
+        private final String filePath;
+        private final Map<String, String> namespaces;
+        private FileOutputStream fos;
+        private boolean headerWritten = false;
+        private final Object writeLock = new Object();
+
+        XMLWriter(BlockingQueue<Object> queue, OutputConfig config, Map<String, String> namespaces) throws IOException {
+            super(queue);
+            this.filePath = config.getPath() + config.getName();
+            this.namespaces = new HashMap<>(namespaces);
+            
+            java.io.File file = new java.io.File(this.filePath);
+            if (file.getParentFile() != null) {
+                file.getParentFile().mkdirs();
+            }
+            
+            boolean reset = "true".equalsIgnoreCase(config.getReset());
+            this.fos = new FileOutputStream(file, !reset);
+            
+            try {
+                if (fos.getChannel().position() > 0) {
+                    this.headerWritten = true;
+                }
+            } catch (IOException e) {
+                logger.warn("Could not check file position for {}", this.filePath, e);
+            }
+        }
+
+        @Override
+        protected void performWrite(List<RDFTripleData> batch) {
+            if (batch.isEmpty()) return;
+
+            synchronized (writeLock) {
+                try {
+                    if (!headerWritten && fos.getChannel().position() == 0) {
+                        writeXMLHeader();
+                        headerWritten = true;
+                    }
+
+                    // Convertir RDFTripleData a Statements para escribir XML
+                    Model batchModel = ModelFactory.createDefaultModel();
+                    for (RDFTripleData tripleData : batch) {
+                        Statement stmt = convertToStatement(batchModel, tripleData);
+                        if (stmt != null) {
+                            batchModel.add(stmt);
+                        }
+                    }
+
+                    StringWriter sw = new StringWriter();
+                    batchModel.write(sw, "RDF/XML-ABBREV");
+                    String body = extractXMLBody(sw.toString());
+                    if (body != null && !body.trim().isEmpty()) {
+                        fos.write(body.getBytes("UTF-8"));
+                        fos.flush();
+                        
+                        triplesWritten.addAndGet(batch.size());
+                        logger.debug("XMLWriter wrote {} triples to file: {}", batch.size(), filePath);
+                    }
+                } catch (IOException e) {
+                    logger.error("Failed to write batch to XML file: " + filePath, e);
+                }
+            }
+        }
+
+        private Statement convertToStatement(Model model, RDFTripleData tripleData) {
+            try {
+                Resource subject = model.createResource(tripleData.getSubjectUri());
+                Property predicate = model.createProperty(tripleData.getPredicateUri());
+                
+                RDFNode object;
+                if (tripleData.isObjectProperty()) {
+                    object = model.createResource(tripleData.getObjectValue());
+                } else {
+                    if (tripleData.getObjectDatatype() != null) {
+                        object = model.createTypedLiteral(tripleData.getObjectValue(), tripleData.getObjectDatatype());
+                    } else if (tripleData.getObjectLanguage() != null && !tripleData.getObjectLanguage().isEmpty()) {
+                        object = model.createLiteral(tripleData.getObjectValue(), tripleData.getObjectLanguage());
+                    } else {
+                        object = model.createLiteral(tripleData.getObjectValue());
+                    }
+                }
+                
+                return model.createStatement(subject, predicate, object);
+            } catch (Exception e) {
+                logger.error("Error converting RDFTripleData to Statement: {}", tripleData, e);
+                return null;
+            }
+        }
+
+        private void writeXMLHeader() throws IOException {
+            Model tempModel = ModelFactory.createDefaultModel();
+            tempModel.setNsPrefixes(this.namespaces);
+            StringWriter sw = new StringWriter();
+            tempModel.write(sw, "RDF/XML");
+            String header = sw.toString().replaceAll("</rdf:RDF>\\s*$", "");
+            fos.write(header.getBytes("UTF-8"));
+        }
+
+        @Override
+        public void close() throws IOException {
+            synchronized (writeLock) {
+                if (fos != null) {
+                    try {
+                        if (headerWritten) {
+                            fos.write("\n</rdf:RDF>".getBytes("UTF-8"));
+                        }
+                        fos.flush();
+                    } catch (IOException e) {
+                        logger.error("Error writing XML footer to file: " + filePath, e);
+                    } finally {
+                        try {
+                            fos.close();
+                        } catch (IOException e) {
+                            logger.error("Error closing file output stream for: " + filePath, e);
+                        }
+                        fos = null;
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Obtener estadísticas de procesamiento simplificadas
+     */
+    public ProcessingStats getProcessingStats() {
+        return new ProcessingStats(
+                tripleBuffer != null ? tripleBuffer.size() : 0,
+                bufferSize,
+                Math.max(0, activeIndexingPhaser.getRegisteredParties() - 1), // Restar el hilo principal
+                triplesProduced.get(),
+                triplesConsumed.get(),
+                triplesWritten.get(),
+                triplesDuplicated.get(),
+                concurrentTasksSemaphore.availablePermits(),
+                maxConcurrentTasks
+        );
+    }
+    
+    /**
+     * Clase para estadísticas de procesamiento
+     */
+    public static class ProcessingStats {
+        private final int bufferSize;
+        private final int bufferCapacity;
+        private final int activeTasks;
+        private final long triplesProduced;
+        private final long triplesConsumed;
+        private final long triplesWritten;
+        private final long triplesDuplicated;
+        private final int availableSlots;
+        private final int maxSlots;
+
+        public ProcessingStats(int bufferSize, int bufferCapacity, int activeTasks, long triplesProduced, 
+                             long triplesConsumed, long triplesWritten, long triplesDuplicated, int availableSlots, int maxSlots) {
+            this.bufferSize = bufferSize;
+            this.bufferCapacity = bufferCapacity;
+            this.activeTasks = activeTasks;
+            this.triplesProduced = triplesProduced;
+            this.triplesConsumed = triplesConsumed;
+            this.triplesWritten = triplesWritten;
+            this.triplesDuplicated = triplesDuplicated;
+            this.availableSlots = availableSlots;
+            this.maxSlots = maxSlots;
+        }
+
+        public int getBufferSize() { return bufferSize; }
+        public int getBufferCapacity() { return bufferCapacity; }
+        public int getActiveTasks() { return Math.max(0, activeTasks); }
+        public long getTriplesProduced() { return triplesProduced; }
+        public long getTriplesConsumed() { return triplesConsumed; }
+        public long getTriplesWritten() { return triplesWritten; }
+        public long getTriplesDuplicated() { return triplesDuplicated; }
+        public int getAvailableSlots() { return availableSlots; }
+        public int getMaxSlots() { return maxSlots; }
+        public int getUsedSlots() { return maxSlots - availableSlots; }
+        public double getBufferUsagePercentage() {
+            return bufferCapacity > 0 ? (double) bufferSize * 100.0 / bufferCapacity : 0.0;
+        }
+        
+        /**
+         * Calcula el porcentaje de triples duplicados del total procesado
+         */
+        public double getDuplicationPercentage() {
+            long totalProcessed = triplesProduced + triplesDuplicated;
+            return totalProcessed > 0 ? (double) triplesDuplicated * 100.0 / totalProcessed : 0.0;
+        }
+        
+        /**
+         * Obtiene el total de triples procesados (únicos + duplicados)
+         */
+        public long getTotalTriplesProcessed() {
+            return triplesProduced + triplesDuplicated;
+        }
+    }
+
     @Override
     public void close() throws IOException {
         synchronized (flushLock) {
@@ -1094,399 +1562,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 logger.warn("Interrupted while waiting for {} executor termination", name);
                 executor.shutdownNow();
                 Thread.currentThread().interrupt();
-            }
-        }
-    }
-    
-    /**
-     * Obtener estadísticas de procesamiento simplificadas
-     */
-    public ProcessingStats getProcessingStats() {
-        return new ProcessingStats(
-                tripleBuffer != null ? tripleBuffer.size() : 0,
-                bufferSize,
-                Math.max(0, activeIndexingPhaser.getRegisteredParties() - 1), // Restar el hilo principal
-                triplesProduced.get(),
-                triplesConsumed.get(),
-                triplesWritten.get(),
-                concurrentTasksSemaphore.availablePermits(),
-                maxConcurrentTasks
-        );
-    }
-    
-    /**
-     * Clase para estadísticas de procesamiento
-     */
-    public static class ProcessingStats {
-        private final int bufferSize;
-        private final int bufferCapacity;
-        private final int activeTasks;
-        private final long triplesProduced;
-        private final long triplesConsumed;
-        private final long triplesWritten;
-        private final int availableSlots;
-        private final int maxSlots;
-
-        public ProcessingStats(int bufferSize, int bufferCapacity, int activeTasks, long triplesProduced, 
-                             long triplesConsumed, long triplesWritten, int availableSlots, int maxSlots) {
-            this.bufferSize = bufferSize;
-            this.bufferCapacity = bufferCapacity;
-            this.activeTasks = activeTasks;
-            this.triplesProduced = triplesProduced;
-            this.triplesConsumed = triplesConsumed;
-            this.triplesWritten = triplesWritten;
-            this.availableSlots = availableSlots;
-            this.maxSlots = maxSlots;
-        }
-
-        public int getBufferSize() { return bufferSize; }
-        public int getBufferCapacity() { return bufferCapacity; }
-        public int getActiveTasks() { return Math.max(0, activeTasks); }
-        public long getTriplesProduced() { return triplesProduced; }
-        public long getTriplesConsumed() { return triplesConsumed; }
-        public long getTriplesWritten() { return triplesWritten; }
-        public int getAvailableSlots() { return availableSlots; }
-        public int getMaxSlots() { return maxSlots; }
-        public int getUsedSlots() { return maxSlots - availableSlots; }
-        public double getBufferUsagePercentage() {
-            return bufferCapacity > 0 ? (double) bufferSize * 100.0 / bufferCapacity : 0.0;
-        }
-    }
-
-    /**
-     * The Distributor thread takes items from the main buffer and distributes them
-     * to all output queues.
-     */
-    private class Distributor implements Runnable {
-        @Override
-        public void run() {
-            logger.info("Distributor thread started.");
-            try {
-                while (!shutdown) {
-                    Object item = tripleBuffer.take();
-                    
-                    if (item instanceof Statement) {
-                        triplesConsumed.incrementAndGet();
-                    }
-
-                    if (item == POISON_PILL) {
-                        logger.info("Distributor received POISON_PILL. Forwarding to writers.");
-                        for (BlockingQueue<Object> queue : outputQueues) {
-                            queue.put(POISON_PILL);
-                        }
-                        break; // Exit run loop
-                    }
-
-                    // Distribute to all output queues
-                    for (BlockingQueue<Object> queue : outputQueues) {
-                        queue.put(item);
-                    }
-                }
-            } catch (InterruptedException e) {
-                if (!shutdown) {
-                    logger.error("Distributor thread was interrupted.", e);
-                }
-                Thread.currentThread().interrupt();
-            }
-            logger.info("Distributor thread is shutting down.");
-        }
-    }
-
-    /**
-     * Abstract base class for writer threads with reduced batch sizes for stability.
-     */
-    private abstract class AbstractWriter implements Runnable, Closeable {
-        protected final BlockingQueue<Object> queue;
-        protected final List<Statement> localBuffer;
-        protected final int batchSize = 250; // Reducir significativamente el tamaño de batch
-        protected final long maxWaitTimeMs = 1000; // Reducir tiempo de espera
-
-        protected AbstractWriter(BlockingQueue<Object> queue) {
-            this.queue = queue;
-            this.localBuffer = new ArrayList<>(batchSize);
-        }
-
-        @Override
-        public void run() {
-            logger.info("{} started.", this.getClass().getSimpleName());
-            long lastWriteTime = System.currentTimeMillis();
-            
-            try {
-                while (true) {
-                    // Usar poll con timeout en lugar de take bloqueante
-                    Object item = queue.poll(500, TimeUnit.MILLISECONDS);
-                    
-                    if (item != null) {
-                        if (item instanceof Statement) {
-                            localBuffer.add((Statement) item);
-                            
-                            // Escribir si se llena el batch o ha pasado suficiente tiempo
-                            if (localBuffer.size() >= batchSize || 
-                                (System.currentTimeMillis() - lastWriteTime) > maxWaitTimeMs) {
-                                writeBatch();
-                                lastWriteTime = System.currentTimeMillis();
-                            }
-                        } else if (item instanceof FlushMarker) {
-                            writeBatch(); // Write remaining triples
-                            lastWriteTime = System.currentTimeMillis();
-                            ((FlushMarker) item).latch.countDown();
-                        } else if (item == POISON_PILL) {
-                            writeBatch(); // Write final batch
-                            break; // Exit run loop
-                        }
-                    } else {
-                        // Timeout - escribir si hay datos pendientes y ha pasado tiempo suficiente
-                        if (!localBuffer.isEmpty() && 
-                            (System.currentTimeMillis() - lastWriteTime) > maxWaitTimeMs) {
-                            writeBatch();
-                            lastWriteTime = System.currentTimeMillis();
-                        }
-                    }
-                }
-            } catch (InterruptedException e) {
-                if (!shutdown) {
-                    logger.error("Writer thread was interrupted.", e);
-                }
-                Thread.currentThread().interrupt();
-            } finally {
-                if (!localBuffer.isEmpty()) {
-                    logger.warn("Writing remaining {} triples from local buffer on thread exit.", localBuffer.size());
-                    writeBatch();
-                }
-                logger.info("{} is shutting down.", this.getClass().getSimpleName());
-            }
-        }
-
-        private void writeBatch() {
-            if (localBuffer.isEmpty()) {
-                return;
-            }
-            int batchSizeToWrite = localBuffer.size();
-            try {
-                performWrite(new ArrayList<>(localBuffer)); // Create copy to avoid concurrent modification
-                logger.debug("{} wrote batch of {} triples", this.getClass().getSimpleName(), batchSizeToWrite);
-            } catch (Exception e) {
-                logger.error("Error writing batch in {}", this.getClass().getSimpleName(), e);
-            } finally {
-                localBuffer.clear();
-            }
-        }
-
-        protected abstract void performWrite(List<Statement> batch);
-    }
-
-    /**
-     * Writer for TDB2 dataset with enhanced thread safety and connection pooling.
-     */
-    private class TDBWriter extends AbstractWriter {
-        private final Dataset tdbDataset;
-        private final String graphName;
-        private final Object tdbWriteLock = new Object(); // Serializar acceso a TDB2
-
-        TDBWriter(BlockingQueue<Object> queue, Dataset tdbDataset, String graphName) {
-            super(queue);
-            this.tdbDataset = tdbDataset;
-            this.graphName = graphName;
-        }
-
-        @Override
-        protected void performWrite(List<Statement> batch) {
-            if (tdbDataset == null || !hasTriplestore || batch.isEmpty()) return;
-            
-            // Serializar completamente el acceso a TDB2 para evitar corrupción
-            synchronized (tdbWriteLock) {
-                boolean transactionStarted = false;
-                try {
-                    // Verificar estado del dataset antes de comenzar transacción
-                    if (tdbDataset.isInTransaction()) {
-                        logger.warn("TDBWriter: Dataset already in transaction, waiting for completion");
-                        Thread.sleep(100); // Pequeña pausa
-                        return; // Reintentará en la próxima iteración
-                    }
-                    
-                    tdbDataset.begin(ReadWrite.WRITE);
-                    transactionStarted = true;
-                    
-                    Model model = (graphName != null && !graphName.isEmpty()) ?
-                            tdbDataset.getNamedModel(graphName) :
-                            tdbDataset.getDefaultModel();
-                    
-                    // Escribir directamente sin verificación de duplicados - TDB2 maneja esto automáticamente
-                    // Escribir en lotes pequeños para mejor estabilidad
-                    int maxBatchSize = 100;
-                    List<Statement> currentBatch = new ArrayList<>();
-                    int batchNumber = 0;
-                    
-                    for (Statement stmt : batch) {
-                        currentBatch.add(stmt);
-                        
-                        if (currentBatch.size() >= maxBatchSize) {
-                            model.add(currentBatch);
-                            logger.debug("TDBWriter wrote sub-batch {} with {} statements", batchNumber, currentBatch.size());
-                            
-                            currentBatch.clear();
-                            batchNumber++;
-                            
-                            // Pausa para permitir que otros threads accedan
-                            if (batch.size() > maxBatchSize && batchNumber % 5 == 0) {
-                                Thread.sleep(10); // Pausa cada 5 sub-lotes
-                            } else {
-                                Thread.yield();
-                            }
-                        }
-                    }
-                    
-                    // Escribir lote restante
-                    if (!currentBatch.isEmpty()) {
-                        model.add(currentBatch);
-                        logger.debug("TDBWriter wrote final sub-batch with {} statements", currentBatch.size());
-                    }
-                    
-                    tdbDataset.commit();
-                    transactionStarted = false;
-                    
-                    // Incrementar contador de triples escritas
-                    triplesWritten.addAndGet(batch.size());
-                    logger.debug("TDBWriter completed writing {} triples to TDB2 in {} sub-batches. TDB2 handles duplicate detection automatically.", 
-                               batch.size(), batchNumber + 1);
-                    
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    logger.warn("TDBWriter interrupted during write operation");
-                    if (transactionStarted && tdbDataset.isInTransaction()) {
-                        try {
-                            tdbDataset.abort();
-                        } catch (Exception abortEx) {
-                            logger.error("Error aborting TDB2 transaction", abortEx);
-                        }
-                    }
-                } catch (Exception e) {
-                    logger.error("Error writing batch to TDB2 dataset: {}", e.getMessage(), e);
-                    if (transactionStarted && tdbDataset.isInTransaction()) {
-                        try {
-                            tdbDataset.abort();
-                        } catch (Exception abortEx) {
-                            logger.error("Error aborting TDB2 transaction after write failure", abortEx);
-                        }
-                    }
-                    // No re-throw para evitar crash del writer thread
-                } finally {
-                    // Asegurar que la transacción se cierre correctamente
-                    if (transactionStarted && tdbDataset.isInTransaction()) {
-                        try {
-                            tdbDataset.end();
-                        } catch (Exception endEx) {
-                            logger.error("Error ending TDB2 transaction", endEx);
-                        }
-                    }
-                }
-            }
-        }
-        
-        @Override
-        public void close() {
-            synchronized (tdbWriteLock) {
-                logger.info("TDBWriter closed");
-                // TDB dataset is closed centrally, nothing to do here.
-            }
-        }
-    }
-
-    /**
-     * Writer for XML files.
-     */
-    private class XMLWriter extends AbstractWriter {
-        private final String filePath;
-        private final Map<String, String> namespaces;
-        private FileOutputStream fos;
-        private boolean headerWritten = false;
-        private final Object writeLock = new Object();
-
-        XMLWriter(BlockingQueue<Object> queue, OutputConfig config, Map<String, String> namespaces) throws IOException {
-            super(queue);
-            this.filePath = config.getPath() + config.getName();
-            this.namespaces = new HashMap<>(namespaces); // Create defensive copy
-            
-            java.io.File file = new java.io.File(this.filePath);
-            if (file.getParentFile() != null) {
-                file.getParentFile().mkdirs();
-            }
-            
-            boolean reset = "true".equalsIgnoreCase(config.getReset());
-            this.fos = new FileOutputStream(file, !reset);
-            
-            // Check if file already has content
-            try {
-                if (fos.getChannel().position() > 0) {
-                    this.headerWritten = true;
-                }
-            } catch (IOException e) {
-                logger.warn("Could not check file position for {}", this.filePath, e);
-            }
-        }
-
-        @Override
-        protected void performWrite(List<Statement> batch) {
-            if (batch.isEmpty()) return;
-            
-            synchronized (writeLock) {
-                try {
-                    // Write header if needed
-                    if (!headerWritten && fos.getChannel().position() == 0) {
-                        writeXMLHeader();
-                        headerWritten = true;
-                    }
-
-                    // Write batch content
-                    Model batchModel = ModelFactory.createDefaultModel();
-                    batchModel.add(batch);
-
-                    StringWriter sw = new StringWriter();
-                    batchModel.write(sw, "RDF/XML-ABBREV");
-                    String body = extractXMLBody(sw.toString());
-                    if (body != null && !body.trim().isEmpty()) {
-                        fos.write(body.getBytes("UTF-8"));
-                        fos.flush(); // Ensure data is written
-                        
-                        // Incrementar contador de triples escritas
-                        triplesWritten.addAndGet(batch.size());
-                        logger.debug("XMLWriter wrote {} triples to file: {}", batch.size(), filePath);
-                    }
-                } catch (IOException e) {
-                    logger.error("Failed to write batch to XML file: " + filePath, e);
-                }
-            }
-        }
-        
-        private void writeXMLHeader() throws IOException {
-            Model tempModel = ModelFactory.createDefaultModel();
-            tempModel.setNsPrefixes(this.namespaces);
-            StringWriter sw = new StringWriter();
-            tempModel.write(sw, "RDF/XML");
-            String header = sw.toString().replaceAll("</rdf:RDF>\\s*$", "");
-            fos.write(header.getBytes("UTF-8"));
-        }
-
-        @Override
-        public void close() throws IOException {
-            synchronized (writeLock) {
-                if (fos != null) {
-                    try {
-                        if (headerWritten) {
-                            fos.write("\n</rdf:RDF>".getBytes("UTF-8"));
-                        }
-                        fos.flush();
-                    } catch (IOException e) {
-                        logger.error("Error writing XML footer to file: " + filePath, e);
-                    } finally {
-                        try {
-                            fos.close();
-                        } catch (IOException e) {
-                            logger.error("Error closing file output stream for: " + filePath, e);
-                        }
-                        fos = null;
-                    }
-                }
             }
         }
     }
