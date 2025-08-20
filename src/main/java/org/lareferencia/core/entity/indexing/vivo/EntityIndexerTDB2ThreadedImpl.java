@@ -153,8 +153,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
     private final AtomicLong triplesWritten = new AtomicLong(0); // Total triples written by all writers
     private final AtomicLong triplesDuplicated = new AtomicLong(0); // Triples that would be duplicated
     
-    // Para tracking de duplicados - usando un Set thread-safe con hash de triples
-    private final Set<String> seenTriples = ConcurrentHashMap.newKeySet();
+    // Optimización de memoria: usar LRU cache en lugar de Set ilimitado
+    private final Map<String, Boolean> seenTriples = new ConcurrentHashMap<>();
+    private final int maxSeenTriplesCache = 1000000; // Máximo 1M triples en cache
+    private final AtomicLong seenTriplesEvictions = new AtomicLong(0);
     
     
     public EntityIndexerTDB2ThreadedImpl() {
@@ -294,7 +296,13 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                     if (!shutdown) { // Re-check after sleep
                         ProcessingStats stats = getProcessingStats();
                         TDB2Stats tdbStats = getTDB2Stats();
-                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB2: {}",
+                        
+                        // Log memoria cada cierto tiempo para monitorear
+                        Runtime runtime = Runtime.getRuntime();
+                        long usedMemory = (runtime.totalMemory() - runtime.freeMemory()) / 1024 / 1024;
+                        long maxMemory = runtime.maxMemory() / 1024 / 1024;
+                        
+                        logger.info("[STATUS] Buffer: {}/{} ({}%). Active Tasks: {}. Slots: {}/{}. Triples: P:{}, C:{}, W:{}, D:{} ({}%). Total: {}. TDB2: {}. Cache: {}. Memory: {}MB/{}MB",
                                 stats.getBufferSize(),
                                 stats.getBufferCapacity(),
                                 String.format("%.2f", stats.getBufferUsagePercentage()),
@@ -307,7 +315,10 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                                 stats.getTriplesDuplicated(),
                                 String.format("%.2f", stats.getDuplicationPercentage()),
                                 stats.getTotalTriplesProcessed(),
-                                tdbStats.toString()
+                                tdbStats.toString(),
+                                seenTriples.size(),
+                                usedMemory,
+                                maxMemory
                         );
                     }
                 } catch (InterruptedException e) {
@@ -607,10 +618,39 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             );
             logger.info("Note: Duplicate statistics are approximated. TDB2 performs final deduplication during storage.");
             
-            // NO shutdown el indexer - solo hacer flush
-            // El indexer debe seguir funcionando para procesar más entidades
+            // DECISIÓN: Limpiar cache después del flush para liberar memoria
+            // Pros: Libera memoria significativa entre páginas
+            // Contras: Pierde información de deduplicación entre páginas (pero TDB2 deduplica automáticamente)
+            clearSeenTriplesCache();
+            logger.info("Cache cleared after flush to free memory for next processing batch.");
+            
             logger.info("Indexer remains active and ready for more processing.");
         }
+    }
+    
+    /**
+     * Limpiar el cache de triples vistos para liberar memoria
+     */
+    private void clearSeenTriplesCache() {
+        int sizeBefore = seenTriples.size();
+        seenTriples.clear();
+        logger.info("Cleared seen triples cache. Freed {} entries from memory.", sizeBefore);
+        
+        // Forzar garbage collection
+        System.gc();
+        
+        // Log memoria disponible
+        Runtime runtime = Runtime.getRuntime();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        long maxMemory = runtime.maxMemory();
+        
+        logger.info("Memory status after cache clear - Used: {}MB, Free: {}MB, Total: {}MB, Max: {}MB", 
+                   usedMemory / 1024 / 1024, 
+                   freeMemory / 1024 / 1024,
+                   totalMemory / 1024 / 1024,
+                   maxMemory / 1024 / 1024);
     }
 
     private String extractXMLBody(String rdfxml) {
@@ -1006,7 +1046,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             if (subjectTypeUri != null) {
                 RDFTripleData typeTriple = RDFTripleData.createObjectProperty(subjectUri, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", subjectTypeUri);
                 
-                if (seenTriples.add(typeTriple.getTripleHash())) {
+                if (addToSeenTriplesCache(typeTriple.getTripleHash())) {
                     tripleBuffer.put(typeTriple);
                     triplesProduced.incrementAndGet();
                 } else {
@@ -1019,7 +1059,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
             if (OBJECT_PROPERTY.equals(predicateType) && objectTypeUri != null) {
                 RDFTripleData objectTypeTriple = RDFTripleData.createObjectProperty(objectValue, "http://www.w3.org/1999/02/22-rdf-syntax-ns#type", objectTypeUri);
                 
-                if (seenTriples.add(objectTypeTriple.getTripleHash())) {
+                if (addToSeenTriplesCache(objectTypeTriple.getTripleHash())) {
                     tripleBuffer.put(objectTypeTriple);
                     triplesProduced.incrementAndGet();
                 } else {
@@ -1038,7 +1078,7 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
                 mainTriple = RDFTripleData.createLiteral(subjectUri, predicateUri, objectValue);
             }
             
-            if (seenTriples.add(mainTriple.getTripleHash())) {
+            if (addToSeenTriplesCache(mainTriple.getTripleHash())) {
                 tripleBuffer.put(mainTriple);
                 triplesProduced.incrementAndGet();
                 logger.debug("Triple added to buffer: S={}, P={}, O={}", subjectUri, predicateUri, objectValue);
@@ -1050,6 +1090,131 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             logger.warn("Interrupted while waiting to add triple to buffer.", e);
+        }
+    }
+    
+    /**
+     * Agregar hash de triple al cache con gestión de memoria
+     * @param tripleHash El hash de la triple
+     * @return true si es la primera vez que se ve esta triple, false si es duplicada
+     */
+    private boolean addToSeenTriplesCache(String tripleHash) {
+        // Si el cache está muy lleno, limpiar algunas entradas más antiguas
+        if (seenTriples.size() > maxSeenTriplesCache) {
+            // Remover aproximadamente 10% de las entradas más antiguas
+            int toRemove = maxSeenTriplesCache / 10;
+            int removed = 0;
+            
+            for (String key : seenTriples.keySet()) {
+                if (removed >= toRemove) break;
+                seenTriples.remove(key);
+                removed++;
+            }
+            
+            seenTriplesEvictions.addAndGet(removed);
+            logger.debug("Evicted {} entries from seen triples cache to free memory", removed);
+        }
+        
+        // Verificar si ya existe y agregarlo si es nuevo
+        return seenTriples.putIfAbsent(tripleHash, Boolean.TRUE) == null;
+    }
+
+    @Override
+    public void close() throws IOException {
+        synchronized (flushLock) {
+            if (shutdown) {
+                return;
+            }
+            logger.info("Closing EntityIndexerTDB2ThreadedImpl...");
+            shutdown = true;
+
+            // 1. Wait for any running producers to finish
+            logger.info("Waiting for final indexing tasks to complete...");
+            int phase = activeIndexingPhaser.arrive();
+            try {
+                activeIndexingPhaser.awaitAdvanceInterruptibly(phase);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.warn("Interrupted while waiting for producers during close.", e);
+            }
+            logger.info("All indexing tasks finished.");
+
+            try {
+                // 2. Signal distributor and writers to shut down
+                logger.info("Signaling shutdown to distributor and writers...");
+                tripleBuffer.put(POISON_PILL);
+
+                // 3. Wait for distributor to finish
+                if (distributorThread != null) {
+                    distributorThread.join();
+                    logger.info("Distributor thread finished.");
+                }
+
+                // 4. Wait for all writer threads to finish
+                for (Thread writerThread : writerThreads) {
+                    writerThread.join();
+                }
+                logger.info("All writer threads finished.");
+
+                // 5. Close all writers
+                for (Closeable writer : writers) {
+                    try {
+                        writer.close();
+                    } catch (IOException e) {
+                        logger.error("Error closing writer", e);
+                    }
+                }
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                logger.error("Interrupted during indexer shutdown.", e);
+            } finally {
+                // 6. Shutdown executors - ESTO DETENDRÁ EL HILO DE MONITOREO
+                shutdownExecutor(indexingExecutor, "Indexing");
+                shutdownExecutor(utilityExecutor, "Utility"); // Este detiene el monitoring thread
+                
+                // 7. Close TDB2 dataset
+                if (hasTriplestore && dataset != null) {
+                    if (dataset.isInTransaction()) {
+                        logger.warn("Transaction was still active during close. Attempting to end.");
+                        dataset.end();
+                    }
+                    dataset.close();
+                    logger.info("TDB2 Dataset closed.");
+                }
+                logger.info("EntityIndexerTDB2ThreadedImpl closed successfully.");
+            }
+        }
+    }
+    
+    private void shutdownExecutor(ExecutorService executor, String name) {
+        if (executor != null) {
+            logger.debug("Shutting down {} executor", name);
+            executor.shutdown();
+            try {
+                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
+                    logger.warn("{} executor did not terminate gracefully, forcing shutdown", name);
+                    List<Runnable> pending = executor.shutdownNow();
+                    logger.warn("{} pending tasks cancelled in {} executor.", pending.size(), name);
+                } else {
+                    logger.info("{} executor shutdown completed successfully", name);
+                }
+            } catch (InterruptedException e) {
+                logger.warn("Interrupted while waiting for {} executor termination", name);
+                executor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+    
+    /**
+     * Método para cerrar el indexer manualmente desde línea de comandos
+     */
+    public void shutdown() {
+        try {
+            close();
+        } catch (IOException e) {
+            logger.error("Error during manual shutdown", e);
         }
     }
     
@@ -1477,103 +1642,6 @@ public class EntityIndexerTDB2ThreadedImpl implements IEntityIndexer, Closeable 
          */
         public long getTotalTriplesProcessed() {
             return triplesProduced + triplesDuplicated;
-        }
-    }
-
-    @Override
-    public void close() throws IOException {
-        synchronized (flushLock) {
-            if (shutdown) {
-                return;
-            }
-            logger.info("Closing EntityIndexerTDB2ThreadedImpl...");
-            shutdown = true;
-
-            // 1. Wait for any running producers to finish
-            logger.info("Waiting for final indexing tasks to complete...");
-            int phase = activeIndexingPhaser.arrive();
-            try {
-                activeIndexingPhaser.awaitAdvanceInterruptibly(phase);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.warn("Interrupted while waiting for producers during close.", e);
-            }
-            logger.info("All indexing tasks finished.");
-
-            try {
-                // 2. Signal distributor and writers to shut down
-                logger.info("Signaling shutdown to distributor and writers...");
-                tripleBuffer.put(POISON_PILL);
-
-                // 3. Wait for distributor to finish
-                if (distributorThread != null) {
-                    distributorThread.join();
-                    logger.info("Distributor thread finished.");
-                }
-
-                // 4. Wait for all writer threads to finish
-                for (Thread writerThread : writerThreads) {
-                    writerThread.join();
-                }
-                logger.info("All writer threads finished.");
-
-                // 5. Close all writers
-                for (Closeable writer : writers) {
-                    try {
-                        writer.close();
-                    } catch (IOException e) {
-                        logger.error("Error closing writer", e);
-                    }
-                }
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.error("Interrupted during indexer shutdown.", e);
-            } finally {
-                shutdownExecutor(indexingExecutor, "Indexing");
-                shutdownExecutor(utilityExecutor, "Utility"); //
-                // 7. Close TDB dataset
-                if (hasTriplestore && dataset != null) {
-                    if (dataset.isInTransaction()) {
-                        logger.warn("Transaction was still active during close. Attempting to end.");
-                        dataset.end();
-                    }
-                    dataset.close();
-                    logger.info("TDB2 Dataset closed.");
-                }
-                logger.info("EntityIndexerTDB2ThreadedImpl closed successfully.");
-            }
-        }
-    }
-    
-    private void shutdownExecutor(ExecutorService executor, String name) {
-        if (executor != null) {
-            logger.debug("Shutting down {} executor", name);
-            executor.shutdown();
-            try {
-                if (!executor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    logger.warn("{} executor did not terminate gracefully, forcing shutdown", name);
-                    List<Runnable> pending = executor.shutdownNow();
-                    logger.warn("{} pending tasks cancelled in {} executor.", pending.size(), name);
-                } else {
-                    logger.info("{} executor shutdown completed successfully", name);
-                }
-            } catch (InterruptedException e) {
-                logger.warn("Interrupted while waiting for {} executor termination", name);
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-            }
-        }
-    }
-    
-    /**
-     * Método para cerrar el indexer manualmente desde línea de comandos
-     */
-    public void shutdown() {
-        try {
-            close();
-        } catch (IOException e) {
-            logger.error("Error during manual shutdown", e);
         }
     }
 }
