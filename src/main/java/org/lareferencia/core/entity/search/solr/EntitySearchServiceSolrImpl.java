@@ -35,7 +35,7 @@ import org.springframework.data.solr.core.query.SimpleQuery;
 import org.springframework.data.solr.core.query.result.ScoredPage;
 import org.springframework.stereotype.Service;
 
-@Service
+// @Service  // Commented out to avoid automatic bean creation when Solr dependencies are not available
 public class EntitySearchServiceSolrImpl implements IEntitySearchService {
 
     @Autowired
