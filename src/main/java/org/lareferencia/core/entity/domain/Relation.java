@@ -20,12 +20,12 @@
 
 package org.lareferencia.core.entity.domain;
 
-import javax.persistence.AssociationOverride;
-import javax.persistence.Column;
-import javax.persistence.Index;
-import javax.persistence.JoinColumn;
-import javax.persistence.JoinTable;
-import javax.persistence.Table;
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.Table;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
@@ -35,7 +35,7 @@ import lombok.Setter;
 
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Table(name = "relation", indexes = { @Index(name = "relation_type_members",  columnList="relation_type_id,from_entity_id,to_entity_id", unique = false) } )
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @AssociationOverride( name="occurrences",
 joinTable=@JoinTable(name = "relation_fieldoccr", 
 					   joinColumns = {@JoinColumn(name = "from_entity_id"), @JoinColumn(name = "relation_type_id"), @JoinColumn(name = "to_entity_id")}, 

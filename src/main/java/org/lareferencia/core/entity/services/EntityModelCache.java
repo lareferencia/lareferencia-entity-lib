@@ -13,7 +13,7 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-import javax.annotation.PreDestroy;
+import jakarta.annotation.PreDestroy;
 
 import org.lareferencia.core.entity.repositories.jpa.EntityTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.FieldTypeRepository;

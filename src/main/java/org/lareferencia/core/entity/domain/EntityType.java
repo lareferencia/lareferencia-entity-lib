@@ -23,9 +23,9 @@ package org.lareferencia.core.entity.domain;
 import java.util.HashSet;
 import java.util.Set;
 
-import javax.persistence.FetchType;
-import javax.persistence.OneToMany;
-import javax.persistence.Table;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 
@@ -37,7 +37,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 @Table(name = "entity_type")
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 public class EntityType extends EntityRelationType {
 	
 	public EntityType(String name) {

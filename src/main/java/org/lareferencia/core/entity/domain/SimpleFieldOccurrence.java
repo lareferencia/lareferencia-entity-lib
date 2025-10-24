@@ -20,8 +20,8 @@
 
 package org.lareferencia.core.entity.domain;
 
-import javax.persistence.Column;
-import javax.persistence.DiscriminatorValue;
+import jakarta.persistence.Column;
+import jakarta.persistence.DiscriminatorValue;
 
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
@@ -29,7 +29,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @NoArgsConstructor
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @DiscriminatorValue("S")
 @EqualsAndHashCode(callSuper = true, onlyExplicitlyIncluded = true)
 public class SimpleFieldOccurrence extends FieldOccurrence {

@@ -62,13 +62,10 @@
 			</exclusions>
 		</dependency>
 
-		<!-- Spring Data Solr - Optional dependency for Solr implementations -->
-		<dependency>
-			<groupId>org.springframework.boot</groupId>
-			<artifactId>spring-boot-starter-data-solr</artifactId>
-			<optional>true</optional>
-		</dependency>
-
+		<!-- REMOVED: spring-boot-starter-data-solr no longer exists in Spring Boot 3.x
+		     Spring Data Solr was deprecated and removed. Using direct Solr dependencies instead.
+		     The solr-core dependency is already inherited from parent POM (version 9.5.0)
+		-->
 
 		<dependency>
 			<groupId>org.springframework.boot</groupId>
@@ -186,6 +183,8 @@
 	<build>
 		<plugins>
 
+			<!-- COMMENTED: Spring Boot 3.x parent POM already configures maven-source-plugin
+			     to avoid duplicate execution. If needed, uncomment and add a classifier.
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-source-plugin</artifactId>
@@ -198,6 +197,7 @@
 					</execution>
 				</executions>
 			</plugin>
+			-->
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-javadoc-plugin</artifactId>

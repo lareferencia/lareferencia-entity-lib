@@ -22,14 +22,14 @@ package org.lareferencia.core.entity.domain;
 
 import java.util.UUID;
 
-import javax.persistence.AssociationOverride;
-import javax.persistence.Column;
-import javax.persistence.FetchType;
-import javax.persistence.Index;
-import javax.persistence.JoinColumn;
-import javax.persistence.JoinTable;
-import javax.persistence.ManyToOne;
-import javax.persistence.Table;
+import jakarta.persistence.AssociationOverride;
+import jakarta.persistence.Column;
+import jakarta.persistence.FetchType;
+import jakarta.persistence.Index;
+import jakarta.persistence.JoinColumn;
+import jakarta.persistence.JoinTable;
+import jakarta.persistence.ManyToOne;
+import jakarta.persistence.Table;
 
 import org.lareferencia.core.util.hashing.XXHash64Hashing;
 
@@ -40,7 +40,7 @@ import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import lombok.Getter;
 import lombok.Setter;
 
-@javax.persistence.Entity
+@jakarta.persistence.Entity
 @Table(name = "source_entity", 
 indexes = { @Index(name = "idx_final_entity_id",  columnList="final_entity_id", unique = false) })
 @AssociationOverride( name="occurrences",
