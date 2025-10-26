@@ -91,15 +91,15 @@ public abstract class EntityRelationType extends CacheableEntityBase<Long> imple
 	
 	/**
 	 * Return names of first level entity fields
-	 * @return List<String>
+	 * @return lista de nombres de campos
 	 */
 	public List<String> getFieldNames() {
 		return new ArrayList<String>( fields.keySet() );
 	}
 	
 	/**
-	 * Return names of first level entity fields
-	 * @return List<String>
+	 * Return fields of first level entity
+	 * @return lista de tipos de campos
 	 */
 	public List<FieldType> getFields() {
 		return new ArrayList<FieldType>( fields.values() );

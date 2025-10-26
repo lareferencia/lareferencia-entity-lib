@@ -360,10 +360,10 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 	/**
 	 * Create the elastic entity from the entity and the relations
 	 *
-	 * @param config
-	 * @param entity
-	 * @param relationsMap
-	 * @throws EntityIndexingException
+	 * @param config configuración de indexación de entidades
+	 * @param entity la entidad a indexar
+	 * @return entidad JSON para Elasticsearch
+	 * @throws EntityIndexingException si ocurre un error durante la indexación
 	 */
 	public JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity) throws EntityIndexingException {
 
