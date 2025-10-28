@@ -49,15 +49,14 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
     @Override
     public void onApplicationEvent(ContextRefreshedEvent event) {
+        // Always initialize the maps to avoid NullPointerException
+        byNameMapsByClass = new HashMap<String, Map<String, ? extends ICacheableNamedEntity<Long>>>();
+        byIdMapsByClass = new HashMap<String, Map<Long, ? extends ICacheableNamedEntity<Long>>>();
+        namesByIdMapsByClass = new HashMap<String, Map<Long, String>>();
 
         try {
-            // Initialize the maps
-            byNameMapsByClass = new HashMap<String, Map<String, ? extends ICacheableNamedEntity<Long>>>();
-            byIdMapsByClass = new HashMap<String, Map<Long, ? extends ICacheableNamedEntity<Long>>>();
-            namesByIdMapsByClass = new HashMap<String, Map<Long, String>>();
-
             // Manually begin transaction
-          TransactionStatus transactionStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
+            TransactionStatus transactionStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
 
             try {
                 // Populate the maps
@@ -69,14 +68,36 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
                 // Commit transaction
                 transactionManager.commit(transactionStatus);
+                System.out.println("EntityModelCache successfully loaded.");
             } catch (Exception e) {
                 // Rollback transaction in case of error
                 transactionManager.rollback(transactionStatus);
                 throw e;
             }
         } catch (Exception e) {
-            System.out.println("Error in EntityModelCache Loading. If the database is not already available, please reload the environment after setup. " + e.getMessage());
+            System.err.println("WARNING: EntityModelCache could not be loaded. Database tables may not exist yet.");
+            System.err.println("This is normal on first startup before running Flyway migrations.");
+            System.err.println("Error details: " + e.getMessage());
+            // Initialize empty maps to avoid NPE in application code
+            initializeEmptyMaps();
         }
+    }
+
+    private void initializeEmptyMaps() {
+        // Initialize empty maps for each type to prevent NPE
+        byNameMapsByClass.put(RelationType.class.getName(), new HashMap<>());
+        byNameMapsByClass.put(EntityType.class.getName(), new HashMap<>());
+        byNameMapsByClass.put(FieldType.class.getName(), new HashMap<>());
+        
+        byIdMapsByClass.put(RelationType.class.getName(), new HashMap<>());
+        byIdMapsByClass.put(EntityType.class.getName(), new HashMap<>());
+        byIdMapsByClass.put(FieldType.class.getName(), new HashMap<>());
+        
+        namesByIdMapsByClass.put(RelationType.class.getName(), new HashMap<>());
+        namesByIdMapsByClass.put(EntityType.class.getName(), new HashMap<>());
+        namesByIdMapsByClass.put(FieldType.class.getName(), new HashMap<>());
+        
+        isFromRelationMap = new HashMap<>();
     }
 
     @PreDestroy
