@@ -118,6 +118,11 @@ public class EntityModelCache {
 
     @PreDestroy
     public void preDestroy() {
+        // Only clean up if the cache was initialized
+        if (!initialized) {
+            return;
+        }
+        
         // Clean up
         for (Map<String, ? extends ICacheableNamedEntity<Long>> map : byNameMapsByClass.values()) {
             map.clear();
