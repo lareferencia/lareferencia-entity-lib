@@ -20,11 +20,11 @@ import org.lareferencia.core.entity.repositories.jpa.FieldTypeRepository;
 import org.lareferencia.core.entity.repositories.jpa.RelationTypeRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.context.ApplicationListener;
-import org.springframework.context.event.ContextRefreshedEvent;
+import org.springframework.stereotype.Component;
 
 
-public class EntityModelCache implements ApplicationListener<ContextRefreshedEvent> {
+@Component
+public class EntityModelCache {
 
     @Autowired
     RelationTypeRepository relationTypeRepository;
@@ -39,17 +39,36 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
     Map<String, Map<Long, ? extends ICacheableNamedEntity<Long>>> byIdMapsByClass;
     Map<String, Map<Long,String>> namesByIdMapsByClass;
 
-
     Map<String, Map<String, Boolean>> isFromRelationMap;
 
-
-    
     @Autowired
     private PlatformTransactionManager transactionManager;
+    
+    private volatile boolean initialized = false;
+    private final Object initLock = new Object();
 
-    @Override
-    public void onApplicationEvent(ContextRefreshedEvent event) {
-        // Always initialize the maps to avoid NullPointerException
+    /**
+     * Lazy initialization of the cache.
+     * This method is called automatically on first access.
+     * It's thread-safe using double-checked locking pattern.
+     */
+    private void ensureInitialized() {
+        if (!initialized) {
+            synchronized (initLock) {
+                if (!initialized) {
+                    initialize();
+                    initialized = true;
+                }
+            }
+        }
+    }
+
+    /**
+     * Initialize the cache by loading data from database.
+     * This is called lazily on first access, not at application startup.
+     */
+    private void initialize() {
+        // Initialize the maps
         byNameMapsByClass = new HashMap<String, Map<String, ? extends ICacheableNamedEntity<Long>>>();
         byIdMapsByClass = new HashMap<String, Map<Long, ? extends ICacheableNamedEntity<Long>>>();
         namesByIdMapsByClass = new HashMap<String, Map<Long, String>>();
@@ -68,18 +87,15 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
                 // Commit transaction
                 transactionManager.commit(transactionStatus);
-                System.out.println("EntityModelCache successfully loaded.");
             } catch (Exception e) {
                 // Rollback transaction in case of error
                 transactionManager.rollback(transactionStatus);
                 throw e;
             }
         } catch (Exception e) {
-            System.err.println("WARNING: EntityModelCache could not be loaded. Database tables may not exist yet.");
-            System.err.println("This is normal on first startup before running Flyway migrations.");
-            System.err.println("Error details: " + e.getMessage());
             // Initialize empty maps to avoid NPE in application code
             initializeEmptyMaps();
+            throw new RuntimeException("Failed to initialize EntityModelCache. Database tables may not exist yet.", e);
         }
     }
 
@@ -140,6 +156,7 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
     }
 
     public boolean isFromRelation(String relationName, String entityTypeName) {
+        ensureInitialized();
         
         if (!isFromRelationMap.containsKey(relationName)) {
             throw new IllegalArgumentException("Relation name not found: " + relationName);
@@ -154,20 +171,24 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
     @SuppressWarnings("unchecked")
     public <T extends ICacheableNamedEntity<Long>>  Map<String, T> getByNameMap(Class<?> clazz) {
+        ensureInitialized();
         return (Map<String, T>) byNameMapsByClass.get(clazz.getSimpleName());
     }
 
     @SuppressWarnings("unchecked")
     public <T extends ICacheableNamedEntity<Long>>  Map<Long, T> getByIdMap(Class<?> clazz) {
+        ensureInitialized();
         return (Map<Long, T>) byIdMapsByClass.get(clazz.getSimpleName());
 	}
 
     public <T extends ICacheableNamedEntity<Long>>  Map<Long, String> getNamesByIdMap(Class<?> clazz) {
+        ensureInitialized();
         return (Map<Long, String>) namesByIdMapsByClass.get(clazz.getSimpleName());
     }
    
     @SuppressWarnings("unchecked")
     public <T extends ICacheableNamedEntity<Long>>  T getObjectByName(Class<?> clazz, String name) throws CacheException {
+        ensureInitialized();
         T t = (T) byNameMapsByClass.get(clazz.getSimpleName()).get(name);
         if (t == null) {
             throw new CacheException("Not found in database: " + clazz.getSimpleName() + " " + name);
@@ -177,6 +198,7 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
     @SuppressWarnings("unchecked")
     public <T extends ICacheableNamedEntity<Long>>  T getObjectById(Class<?> clazz, Long id) throws CacheException {
+        ensureInitialized();
         T t = (T) byIdMapsByClass.get(clazz.getSimpleName()).get(id);
         if (t == null) {
             throw new CacheException("Not found in database: " + clazz.getSimpleName() + " " + id);
@@ -186,11 +208,13 @@ public class EntityModelCache implements ApplicationListener<ContextRefreshedEve
 
     // Get the name of the object by its id
     public <T extends ICacheableNamedEntity<Long>> String getNameById(Class<?> clazz, Long id) throws CacheException {
+        ensureInitialized();
         return getObjectById(clazz, id).getName();
     }
 
     // Get the id of the object by its name
     public <T extends ICacheableNamedEntity<Long>> Long getIdByName(Class<?> clazz, String name) throws CacheException {
+        ensureInitialized();
         return getObjectByName(clazz, name).getId();
     }
 
