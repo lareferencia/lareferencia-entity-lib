@@ -248,18 +248,17 @@ public class EntityRelationUnitTests {
   
     }
     
+    
     @Test
     @Transactional
     public void test_entity_data_parsing() throws Exception {
     
     	Document doc = getXmlDocumentFromResourcePath("entity-data-test1.xml");
-    	XMLEntityRelationData data = dataService.parseEntityRelationDataFromXmlDocument(doc);
+    	XMLEntityRelationData data = dataService.parseEntityRelationDataFromXmlDocumentNonTransactional(doc);
     	
     	assertThat(data).isNotNull();
-    
-    }
-    
-    
+
+    }    
 //  @Test
 //  @Transactional
 //  public void test_entity_model_and_data_xml_loading() throws Exception {

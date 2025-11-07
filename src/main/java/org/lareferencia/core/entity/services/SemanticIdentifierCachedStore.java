@@ -34,7 +34,12 @@ public class SemanticIdentifierCachedStore extends ConcurrentCachedStore<Long, S
         super(repository, capacity, false, 0);
     }
 
-    public synchronized SemanticIdentifier loadOrCreate(String semantiIdentifier) {
+    /**
+     * Load or create a SemanticIdentifier.
+     * Thread-safety is guaranteed by Caffeine cache (thread-safe by design)
+     * and the second verification in put() method.
+     */
+    public SemanticIdentifier loadOrCreate(String semantiIdentifier) {
 
         SemanticIdentifier createdSemanticIdentifier = new SemanticIdentifier(semantiIdentifier);
 

@@ -26,25 +26,20 @@ import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.FieldType;
 import org.lareferencia.core.entity.repositories.jpa.FieldOccurrenceRepository;
 
-
 import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.TransactionStatus;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.DefaultTransactionDefinition;
 
 public class FieldOcurrenceCachedStore extends ConcurrentCachedStore<Long, FieldOccurrence, FieldOccurrenceRepository> {
 
-    private final PlatformTransactionManager transactionManager;
-
     public FieldOcurrenceCachedStore(FieldOccurrenceRepository repository, Integer capacity, PlatformTransactionManager transactionManager) {
         super(repository, capacity, false, 0);
-        this.transactionManager = transactionManager;
     }
 
-    @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public synchronized FieldOccurrence loadOrCreate(FieldType type, IFieldValueInstance field) throws EntityRelationException {
-        TransactionStatus transactionStatus = transactionManager.getTransaction(new DefaultTransactionDefinition());
+    /**
+     * Load or create a FieldOccurrence. 
+     * This method is NOT transactional - it runs within the caller's transaction context.
+     * The actual persistence is handled by the parent class's put() method.
+     */
+    public FieldOccurrence loadOrCreate(FieldType type, IFieldValueInstance field) throws EntityRelationException {
         try {
             FieldOccurrence createdFieldOccr = type.buildFieldOccurrence();
 
@@ -65,20 +60,16 @@ public class FieldOcurrenceCachedStore extends ConcurrentCachedStore<Long, Field
             // update the id
             createdFieldOccr.updateId();
 
+            // Check cache first, then create if needed
             FieldOccurrence existingFieldOccr = this.get(createdFieldOccr.getId());
             if (existingFieldOccr == null) {
                 this.put(createdFieldOccr.getId(), createdFieldOccr);
-                transactionManager.commit(transactionStatus);
                 return createdFieldOccr;
             } else {
-                transactionManager.rollback(transactionStatus);
                 return existingFieldOccr;
             }
         } catch (Exception e) {
-            if (!transactionStatus.isCompleted()) {
-                transactionManager.rollback(transactionStatus);
-            }
-            throw new EntityRelationException("Error during transaction", e);
+            throw new EntityRelationException("Error creating field occurrence: " + e.getMessage(), e);
         }
     }
 }

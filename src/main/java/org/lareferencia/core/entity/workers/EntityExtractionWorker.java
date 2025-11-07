@@ -27,7 +27,6 @@ import org.apache.logging.log4j.Logger;
 import org.lareferencia.backend.domain.OAIRecord;
 import org.lareferencia.backend.services.SnapshotLogService;
 import org.lareferencia.core.entity.services.EntityDataService;
-import org.lareferencia.core.entity.services.EntityLRUCache;
 import org.lareferencia.core.metadata.IMDFormatTransformer;
 import org.lareferencia.core.metadata.IMetadataRecordStoreService;
 import org.lareferencia.core.metadata.MDFormatTranformationException;

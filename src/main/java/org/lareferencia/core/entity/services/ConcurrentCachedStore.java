@@ -27,7 +27,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -60,23 +59,37 @@ public class ConcurrentCachedStore<K,C extends ICacheableEntity<K>,R extends Jpa
 
     }
 
+    /**
+     * Get entity from cache or load from database.
+     * This is a read operation and runs within the caller's transaction context.
+     */
     public C get(K key) {
         return cache.get(key, k -> {
             Optional<C> optObj = repository.findById(key);
-            if (optObj.isPresent())
-                return (C) Hibernate.unproxy(optObj.get());
-            else
+            if (optObj.isPresent()) {
+                @SuppressWarnings("unchecked")
+                C entity = (C) Hibernate.unproxy(optObj.get());
+                return entity;
+            } else {
                 return null;
+            }
         });
     }
 
-    @Transactional(readOnly = false, propagation = Propagation.REQUIRES_NEW,  isolation = Isolation.SERIALIZABLE)
-    public synchronized void put(K key, C obj) {
+    /**
+     * Put entity into cache and persist to database.
+     * Runs within the caller's transaction context - does NOT create a new transaction.
+     * This prevents transaction conflicts and rollback-only issues.
+     */
+    @Transactional(readOnly = false, propagation = Propagation.MANDATORY)
+    public void put(K key, C obj) {
 
         if ( cache.getIfPresent(key) == null ) {
 
             if ( !readOnly) {
-                repository.saveAndFlush(obj);
+                // Use save() instead of saveAndFlush() to defer persistence
+                // The flush will happen at transaction commit
+                repository.save(obj);
                 obj.markAsStored();
             }
 

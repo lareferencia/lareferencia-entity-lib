@@ -22,9 +22,9 @@
 package org.lareferencia.core.entity.services;
 
 import org.lareferencia.core.entity.domain.Provenance;
-import org.lareferencia.core.entity.domain.Provenance;
 import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
-import org.lareferencia.core.entity.repositories.jpa.ProvenanceRepository;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -37,7 +37,13 @@ public class ProvenanceStore  {
         this.repository = repository;
     }
 
-    public synchronized Provenance loadOrCreate(String source, String record)  {
+    /**
+     * Load or create a Provenance record.
+     * Runs within the caller's transaction context.
+     * Removed synchronized to prevent deadlocks with database transactions.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Provenance loadOrCreate(String source, String record)  {
 
         Provenance createdProvenance = new Provenance(source,record);
 
@@ -46,12 +52,17 @@ public class ProvenanceStore  {
         if ( optProvenance.isPresent() )
             return optProvenance.get();
         else {
-            repository.saveAndFlush(createdProvenance);
+            // Use save() instead of saveAndFlush() - flush will happen at transaction commit
+            repository.save(createdProvenance);
             return createdProvenance;
         }
     }
 
-
+    /**
+     * Update the last update timestamp of a Provenance record.
+     * This executes a @Modifying query which requires an active transaction.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
     public void setLastUpdate(Provenance provenance, LocalDateTime lastUpdate) {
         repository.setLastUpdate(provenance.getId(), lastUpdate);
     }

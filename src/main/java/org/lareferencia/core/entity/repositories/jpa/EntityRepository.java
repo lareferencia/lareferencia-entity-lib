@@ -21,16 +21,13 @@
 package org.lareferencia.core.entity.repositories.jpa;
 
 
-import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.lang.reflect.Field;
 import java.time.LocalDateTime;
 
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
-import org.lareferencia.core.entity.domain.FieldOccurrence;
 import org.lareferencia.core.entity.domain.Relation;
 import org.lareferencia.core.entity.domain.RelationId;
 import org.springframework.data.domain.Page;
@@ -151,8 +148,8 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	
 	/////////////////////////////////// Entity and Relation building from SourceEntity And Relation Entity
 	
-	@Query(value = "CALL merge_entity_relation_data(0);", nativeQuery = true)
-	int mergeEntiyRelationData();
+	@Query(value = "SELECT merge_dirty_entities_and_relations();", nativeQuery = true)
+	void mergeDirtyEntitiesAndRelations();
 
 
    
