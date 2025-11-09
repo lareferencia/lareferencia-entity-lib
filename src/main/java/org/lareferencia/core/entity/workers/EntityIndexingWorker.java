@@ -165,6 +165,19 @@ public class EntityIndexingWorker extends BaseBatchWorker<Entity, EntityIndexing
     @Override
     public void postRun() {
         logInfo("EntityRelationIndexing worker :: FINISHED :: " + runningContext.toString());
+        
+        // Cerrar el indexer para liberar todos los recursos (threads, conexiones, etc.)
+        if (indexer != null) {
+            try {
+                logInfo("Closing indexer and releasing resources...");
+                if (indexer instanceof java.io.Closeable) {
+                    ((java.io.Closeable) indexer).close();
+                    logInfo("Indexer closed successfully - all resources released");
+                }
+            } catch (Exception e) {
+                logError("Error closing indexer: " + e.getMessage());
+            }
+        }
     }
 
     @Override

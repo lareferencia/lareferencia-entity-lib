@@ -22,19 +22,14 @@ package org.lareferencia.core.entity.indexing.elastic;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
@@ -68,8 +63,6 @@ import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.lareferencia.core.entity.services.EntityModelCache;
 import org.lareferencia.core.entity.services.exception.EntitiyRelationXMLLoadingException;
-import org.opensearch.action.bulk.BulkRequest;
-import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.client.RequestOptions;
 import org.opensearch.client.RestClient;
@@ -86,7 +79,6 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.TransactionStatus;
 import org.springframework.transaction.support.DefaultTransactionDefinition;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 
@@ -132,9 +124,6 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     @Value("${elastic.authenticate:false}")
     private Boolean authenticate;
 
-    @Value("${elastic.indexer.writer.threads:0}")
-    private Integer elasticWriterThreadsConfig; // 0 = auto-calculate
-    
     @Value("${elastic.indexer.max.retries:10}")
     private int maxRetries;
     
@@ -143,21 +132,6 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     
     @Value("${elastic.indexer.circuit.breaker.reset.timeout.ms:60000}")
     private long circuitBreakerResetTimeoutMs;
-    
-    @Value("${elastic.indexer.dlq.capacity:10000}")
-    private int dlqCapacity;
-    
-    @Value("${elastic.indexer.dlq.max.age.ms:86400000}")
-    private long dlqMaxAgeMs; // 24 horas por defecto
-    
-    @Value("${elastic.indexer.dlq.max.retries:3}")
-    private int dlqMaxRetries;
-    
-    @Value("${elastic.indexer.buffer.size:10000}")
-    private int bufferSizeConfig;
-    
-    @Value("${elastic.indexer.monitoring.interval.seconds:10}")
-    private long monitoringIntervalSecondsConfig;
     
     @Value("${elastic.indexer.max.concurrent.tasks:0}")
     private int maxConcurrentTasksConfig; // 0 = auto-calculate
@@ -170,23 +144,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     private FieldOccurrenceFilterService fieldOccurrenceFilterService;
 
     // --- THREADING COMPONENTS ---
-    // Marker objects for queue control
-    private static final Object POISON_PILL = new Object();
-    private static class FlushMarker {
-        final CountDownLatch latch;
-        FlushMarker(CountDownLatch latch) {
-            this.latch = latch;
-        }
-    }
-
-    private ExecutorService indexingExecutor; // For producers
-    private ExecutorService utilityExecutor; // For monitoring
-    
-    private BlockingQueue<Object> documentBuffer; // Main input queue for JSONEntityElastic, FlushMarkers, POISON_PILL
-    private final List<BlockingQueue<Object>> outputQueues = new ArrayList<>();
-    private final List<Thread> writerThreads = new ArrayList<>();
-    private Thread distributorThread;
-    private final List<Closeable> writers = new ArrayList<>();
+    private ExecutorService indexingExecutor; // For entity processing threads
 
     private final Phaser activeIndexingPhaser = new Phaser(1); // Tracks producer tasks
     private volatile boolean shutdown = false;
@@ -195,30 +153,17 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     // Configuração de threading
     private int indexingThreads = Runtime.getRuntime().availableProcessors();
     
-    // Configuração específica para Elasticsearch - múltiples escritores concurrentes
-    private int elasticWriterThreads = Math.max(2, indexingThreads / 2); // Al menos 2 escritores
-    
     // Variables de threading (inicializadas en initializeThreading() con valores de configuración)
-    private int bufferSize;
-    private long monitoringIntervalSeconds;
     private int maxConcurrentTasks;
     private Semaphore concurrentTasksSemaphore;
 
     // Stats
     private final AtomicLong documentsProduced = new AtomicLong(0);
-    private final AtomicLong documentsConsumed = new AtomicLong(0);
     private final AtomicLong documentsIndexed = new AtomicLong(0);
     private final AtomicLong documentsFailedPermanently = new AtomicLong(0);
     
-    // Dead Letter Queue stats
-    private final AtomicLong documentsSentToDLQ = new AtomicLong(0);
-    private final AtomicLong documentsReprocessedFromDLQ = new AtomicLong(0);
-    
     // Circuit Breaker para Elasticsearch
     private ElasticCircuitBreaker circuitBreaker;
-    
-    // Dead Letter Queue para recuperación de documentos fallidos
-    private BlockingQueue<DeadLetterItem> deadLetterQueue;
     
     public JSONElasticEntityIndexerThreadedImpl() {
         // Constructor
@@ -267,21 +212,9 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
     private void initializeThreading() {
         // Aplicar configuración externalizada con valores por defecto
-        this.bufferSize = bufferSizeConfig > 0 ? bufferSizeConfig : 10000;
-        this.monitoringIntervalSeconds = monitoringIntervalSecondsConfig > 0 ? monitoringIntervalSecondsConfig : 10;
         this.maxConcurrentTasks = maxConcurrentTasksConfig > 0 ? maxConcurrentTasksConfig : (indexingThreads * 2);
         
-        this.documentBuffer = new LinkedBlockingQueue<>(bufferSize);
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
-        this.utilityExecutor = Executors.newSingleThreadExecutor();
-        
-        // Calculate optimal number of Elasticsearch writers
-        if (elasticWriterThreadsConfig != null && elasticWriterThreadsConfig > 0) {
-            this.elasticWriterThreads = elasticWriterThreadsConfig;
-        } else {
-            // Auto-calculate: use more writers for better Elasticsearch concurrency
-            this.elasticWriterThreads = Math.max(2, Math.min(indexingThreads, 6)); // Entre 2 y 6 escritores
-        }
         
         // Inicializar semáforo para limitar tareas concurrentes
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
@@ -289,91 +222,27 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         // Inicializar Circuit Breaker para Elasticsearch con configuración externalizada
         this.circuitBreaker = new ElasticCircuitBreaker(circuitBreakerMaxFailures, circuitBreakerResetTimeoutMs);
         
-        // Inicializar Dead Letter Queue para recuperación de documentos fallidos
-        this.deadLetterQueue = new LinkedBlockingQueue<>(dlqCapacity);
-
-        // Create multiple Elasticsearch writers for concurrent indexing
-        for (int i = 0; i < elasticWriterThreads; i++) {
-            BlockingQueue<Object> queue = new LinkedBlockingQueue<>(bufferSize);
-            outputQueues.add(queue);
-            
-            try {
-                ElasticWriter writer = new ElasticWriter(queue, i);
-                writers.add(writer);
-                Thread writerThread = new Thread(writer, "ElasticWriter-Thread-" + i);
-                writerThreads.add(writerThread);
-            } catch (Exception e) {
-                logger.error("Error creating Elastic writer {}: {}", i, e.getMessage(), e);
-                throw new RuntimeException("Failed to create Elastic writer " + i, e);
-            }
-        }
-
-        // Create and start the distributor thread
-        this.distributorThread = new Thread(new Distributor(), "DocumentDistributor-Thread");
-        this.distributorThread.start();
-
-        // Start all writer threads
-        for (Thread t : writerThreads) {
-            t.start();
-        }
-        
-        // Iniciar el monitor de estado
-        startMonitoringThread();
-        
-        logger.info("Threading initialized with {} indexing threads, {} Elasticsearch writers, max {} concurrent tasks, and 1 distributor.", 
-                   indexingThreads, elasticWriterThreads, maxConcurrentTasks);
+        logger.info("Threading initialized with {} indexing threads and max {} concurrent tasks.", 
+                   indexingThreads, maxConcurrentTasks);
     }
 
-    private void startMonitoringThread() {
-        utilityExecutor.submit(() -> {
-            logger.info("Monitoring thread started.");
-            while (!shutdown) {
-                try {
-                    Thread.sleep(monitoringIntervalSeconds * 1000);
-                    
-                    ProcessingStats stats = getProcessingStats();
-                    logger.info("[STATUS] Buffer: {}/{} ({:.2f}%). Active Tasks: {}. Slots: {}/{}. " +
-                               "Documents: P:{}, C:{}, I:{}, F:{}. DLQ: {}/{} (Sent:{}, Reprocessed:{}). Circuit Breaker: {}",
-                               stats.getBufferSize(), stats.getBufferCapacity(), stats.getBufferUsagePercentage(),
-                               stats.getActiveTasks(), stats.getUsedSlots(), stats.getMaxSlots(), 
-                               stats.getDocumentsProduced(), stats.getDocumentsConsumed(), 
-                               stats.getDocumentsIndexed(), stats.getDocumentsFailed(),
-                               stats.getDlqSize(), dlqCapacity, stats.getDocumentsSentToDLQ(), 
-                               stats.getDocumentsReprocessedFromDLQ(),
-                               stats.getCircuitBreakerStatus());
-                               
-                    // Alertar se o buffer está muito cheio
-                    if (stats.getBufferUsagePercentage() > 80.0) {
-                        logger.warn("Buffer usage is high: {:.2f}%", stats.getBufferUsagePercentage());
-                    }
-                    
-                    // Alertar si hay documentos que fallaron permanentemente
-                    if (stats.getDocumentsFailed() > 0) {
-                        logger.warn("Documents failed permanently: {}", stats.getDocumentsFailed());
-                    }
-                    
-                    // Alertar si el DLQ está llenándose
-                    if (stats.getDlqSize() > dlqCapacity * 0.8) {
-                        logger.warn("Dead Letter Queue is filling up: {}/{} ({:.1f}%). Consider processing DLQ.", 
-                                  stats.getDlqSize(), dlqCapacity, 
-                                  (stats.getDlqSize() * 100.0) / dlqCapacity);
-                    }
-                    
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    logger.error("Error in monitoring thread: " + e.getMessage(), e);
-                }
-            }
-            logger.info("Monitoring thread finished.");
-        });
-    }
-
-    private void processEntityWithTransaction(Entity entity) throws EntityIndexingException {
-        logger.debug("Processing entity with transaction: {}", entity.getId());
+    /**
+     * Procesa una entidad dentro de una transacción read-only.
+     * Este método encapsula TODO el ciclo de vida de procesamiento de una entidad:
+     * 1. Carga la entidad desde la BD dentro de la transacción
+     * 2. Accede a los campos lazy (automáticamente cargados por JPA)
+     * 3. Genera el documento JSON para Elasticsearch
+     * 4. Indexa el documento directamente en Elasticsearch
+     * 
+     * Todo ocurre en el mismo thread con la misma transacción, garantizando
+     * que los campos lazy se cargan correctamente sin LazyInitializationException.
+     * 
+     * @param entityId UUID de la entidad a procesar
+     */
+    private void processEntityInTransaction(UUID entityId) throws EntityIndexingException {
+        logger.debug("Starting transaction for entity: {}", entityId);
         
-        // Crear una nueva transacción independiente OPTIMIZADA PARA READ-ONLY
+        // Crear transacción read-only optimizada
         DefaultTransactionDefinition def = new DefaultTransactionDefinition();
         
         // OPTIMIZACIÓN: Marcar como read-only para mejor performance
@@ -384,167 +253,63 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         def.setReadOnly(true);
         
         // Usar READ_COMMITTED para prevenir dirty reads y garantizar lecturas consistentes
-        // Esto asegura que solo se lean datos confirmados por otras transacciones
         def.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
         
         // REQUIRES_NEW: Cada thread de indexación tiene su propia transacción independiente
-        // Esto es crítico para concurrencia y lazy loading en threads separados
         def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
         
-        // Timeout de 30 segundos para detectar problemas (entidades muy complejas o BD lenta)
+        // Timeout de 30 segundos para detectar problemas
         def.setTimeout(30);
         
         TransactionStatus status = transactionManager.getTransaction(def);
-        logger.debug("Read-only transaction started for entity: {}", entity.getId());
+        logger.debug("Read-only transaction started for entity: {}", entityId);
         
         try {
-            processEntityInternal(entity);
-            transactionManager.commit(status); // Commit ligero para transacciones read-only
-            logger.debug("Read-only transaction committed for entity: {}", entity.getId());
+            // 1. Cargar entidad desde la BD (dentro de la transacción)
+            Optional<Entity> entityOpt = entityDataService.getEntityById(entityId);
+            if (entityOpt.isEmpty()) {
+                logger.error("Entity not found: {}", entityId);
+                transactionManager.commit(status);
+                return;
+            }
+            
+            Entity entity = entityOpt.get();
+            logger.debug("Entity loaded: {}", entityId);
+            
+            // 2. Generar documento Elasticsearch (dentro de transacción - lazy loading funciona)
+            String json = generateElasticDocument(entity);
+            
+            // Obtener el nombre del índice
+            EntityType type = entityModelCache.getObjectById(EntityType.class, entity.getEntityTypeId());
+            EntityIndexingConfig entityIndexingConfig = configsByEntityType.get(type.getName());
+            String indexName = entityIndexingConfig != null ? entityIndexingConfig.getName() : null;
+            
+            if (indexName == null) {
+                logger.warn("No indexing config found for entity type: {} (entity: {})", type.getName(), entityId);
+                transactionManager.commit(status);
+                return;
+            }
+            
+            // 3. Commit de la transacción read-only (antes de indexar)
+            transactionManager.commit(status);
+            logger.debug("Read-only transaction committed for entity: {}", entityId);
+            documentsProduced.incrementAndGet();
+            
+            // 4. Indexar directamente en Elasticsearch (fuera de transacción)
+            indexDocumentInElasticsearch(entityId.toString(), json, indexName);
+            
         } catch (Exception e) {
             transactionManager.rollback(status);
-            logger.error("Read-only transaction rolled back for entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error processing entity: " + entity.getId() + ". " + e.getMessage());
+            logger.error("Read-only transaction rolled back for entity {}: {}", entityId, e.getMessage(), e);
+            throw new EntityIndexingException("Error processing entity: " + entityId + ". " + e.getMessage());
         }
     }
-
-    @Override
-    public void prePage() throws EntityIndexingException {
-        // En esta implementación, no necesitamos transacciones por página
-        // ya que los threads manejan la concurrencia
-    }
-
-    @Override
-    public void index(Entity entity) throws EntityIndexingException {
-        if (shutdown) {
-            throw new EntityIndexingException("Indexer is shutting down");
-        }
-        
-        logger.debug("Starting async index process for entity: {} (type: {})", entity.getId(), entity.getEntityTypeId());
-        
-        try {
-            // Adquirir permiso del semáforo antes de procesar
-            concurrentTasksSemaphore.acquire();
-            logger.debug("Acquired semaphore permit for entity: {} (available: {})", 
-                        entity.getId(), concurrentTasksSemaphore.availablePermits());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new EntityIndexingException("Interrupted while waiting for processing slot for entity: " + entity.getId());
-        }
-        
-        // Registrar este hilo en el phaser
-        activeIndexingPhaser.register();
-        logger.debug("Registered with phaser. Current parties: {}", activeIndexingPhaser.getRegisteredParties());
-        
-        try {
-            // Capturar solo el UUID de la entidad para evitar problemas de concurrencia con Hibernate
-            final UUID entityId = entity.getId();
-            
-            // Enviar solo los IDs al procesamiento paralelo
-            CompletableFuture.runAsync(() -> {
-                try {
-                    logger.debug("Starting parallel processing for entity: {}", entityId);
-                    
-                    // Recargar la entidad con una nueva sesión/transacción
-                    Optional<Entity> reloadedEntity = entityDataService.getEntityById(entityId);
-                    if (reloadedEntity.isEmpty()) {
-                        logger.error("Entity not found after reload: {}", entityId);
-                        return;
-                    }
-                    
-                    // Pre-cargar datos para evitar lazy loading
-                    Entity preloadedEntity = preloadEntityData(reloadedEntity.get());
-                    
-                    // Procesar la entidad en una transacción separada
-                    processEntityWithTransaction(preloadedEntity);
-                    
-                    logger.debug("Parallel processing completed for entity: {}", entityId);
-                    
-                } catch (Exception e) {
-                    logger.error("Error in parallel processing for entity {}: {}", entityId, e.getMessage(), e);
-                } finally {
-                    // Liberar semáforo y desregistrar del phaser
-                    concurrentTasksSemaphore.release();
-                    activeIndexingPhaser.arriveAndDeregister();
-                    logger.debug("Released semaphore and deregistered from phaser for entity: {} (available: {})", 
-                                entityId, concurrentTasksSemaphore.availablePermits());
-                }
-            }, indexingExecutor);
-            
-            // El método retorna inmediatamente sin esperar el preload ni el procesamiento
-            logger.debug("Entity {} queued for async processing (will be reloaded in parallel)", entityId);
-            
-        } catch (Exception e) {
-            // Si hay error en el setup, liberar semáforo y desregistrar del phaser
-            concurrentTasksSemaphore.release();
-            activeIndexingPhaser.arriveAndDeregister();
-            logger.error("Error setting up async processing for entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error queueing entity for async processing: " + entity.getId() + ". " + e.getMessage());
-        }
-    }
-
+    
     /**
-     * Pre-carga todas las relaciones y ocurrencias necesarias para evitar lazy loading en threads separados
+     * Genera el documento JSON de Elasticsearch para una entidad.
+     * Este método procesa la entidad y todas sus relaciones anidadas.
      */
-    private Entity preloadEntityData(Entity entity) throws EntityIndexingException {
-        logger.debug("Starting preload for entity: {}", entity.getId());
-        
-        try {
-            // Cargar ocurrencias de la entidad
-            EntityType type = entityModelCache.getObjectById(EntityType.class, entity.getEntityTypeId());
-            String entityTypeName = type.getName();
-            logger.debug("Entity type: {} for entity: {}", entityTypeName, entity.getId());
-            
-            EntityIndexingConfig entityIndexingConfig = configsByEntityType.get(entityTypeName);
-
-            if (entityIndexingConfig == null) {
-                logger.warn("No indexing config found for entity type: {} (entity: {})", entityTypeName, entity.getId());
-                return entity;
-            }
-
-            // Cargar ocurrencias de atributos si es necesario
-            List<FieldIndexingConfig> indexFields = entityIndexingConfig.getIndexFields();
-            if (indexFields != null && !indexFields.isEmpty()) {
-                entity.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
-                logger.debug("Loaded field occurrences for entity: {}", entity.getId());
-            }
-
-            // Pre-cargar todas las relaciones y sus ocurrencias para entidades anidadas
-            int relationCount = 0;
-            for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
-                String relationName = nestedEntityConfig.getEntityRelation();
-                String nestedEntityTypeName = nestedEntityConfig.getEntityType();
-
-                Boolean isFromMember = entityModelCache.isFromRelation(relationName, nestedEntityTypeName);
-                
-                try {
-                    Collection<UUID> nestedRelatedEntityIds = entityDataService.getMemberRelatedEntitiesIds(entity.getId(), relationName, isFromMember);
-                    
-                    for (UUID nestedRelatedEntityId : nestedRelatedEntityIds) {
-                        Optional<Entity> nestedEntity = entityDataService.getEntityById(nestedRelatedEntityId);
-                        if (nestedEntity.isPresent()) {
-                            // Pre-cargar ocurrencias de la entidad anidada
-                            nestedEntity.get().loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
-                            relationCount++;
-                        }
-                    }
-                } catch (EntitiyRelationXMLLoadingException e) {
-                    logger.warn("Error loading nested entities for relation {}: {}", relationName, e.getMessage());
-                }
-            }
-            
-            logger.debug("Preload completed for entity: {}. Total nested entities processed: {}", entity.getId(), relationCount);
-            return entity;
-            
-        } catch (Exception e) {
-            logger.error("Error preloading entity data for {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error preloading entity data: " + entity.getId() + ". " + e.getMessage());
-        }
-    }
-
-    private void processEntityInternal(Entity entity) throws EntityIndexingException {
-        logger.debug("Starting internal processing for entity: {}", entity.getId());
-        
+    private String generateElasticDocument(Entity entity) throws EntityIndexingException {
         try {
             // Agregar entidad al cache local del thread
             entityDataService.addEntityToCache(entity);
@@ -555,14 +320,13 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             EntityIndexingConfig entityIndexingConfig = configsByEntityType.get(entityTypeName);
 
             if (entityIndexingConfig == null) {
-                logger.warn("No indexing config found for entity type: {} (entity: {})", entityTypeName, entity.getId());
-                return;
+                throw new EntityIndexingException("No indexing config found for entity type: " + entityTypeName);
             }
 
             // Crear la entidad elástica
             JSONEntityElastic elasticEntity = createElasticEntity(entityIndexingConfig, entity);
 
-            // Procesar entidades anidadas (ya pre-cargadas)
+            // Procesar entidades anidadas
             for (EntityIndexingConfig nestedEntityConfig : entityIndexingConfig.getIndexNestedEntities()) {
                 String relationName = nestedEntityConfig.getEntityRelation();
                 String nestedEntityTypeName = nestedEntityConfig.getEntityType();
@@ -589,25 +353,129 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                     }
                 }
             }
-
-            // Crear documento de indexación
-            ElasticDocument document = new ElasticDocument(elasticEntity, entityIndexingConfig.getName());
             
-            // Enviar documento al buffer
-            try {
-                documentBuffer.put(document);
-                documentsProduced.incrementAndGet();
-                logger.debug("Document queued for indexing: {}", entity.getId());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new EntityIndexingException("Interrupted while queueing document for entity: " + entity.getId());
-            }
-            
-            logger.debug("Internal processing completed for entity: {}", entity.getId());
+            // Serializar a JSON
+            return jsonMapper.writeValueAsString(elasticEntity);
             
         } catch (Exception e) {
-            logger.error("Unexpected error processing entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Unexpected error indexing entity: " + entity.getId() + ". " + e.getMessage());
+            logger.error("Error generating elastic document for entity {}: {}", entity.getId(), e.getMessage(), e);
+            throw new EntityIndexingException("Error generating elastic document: " + entity.getId() + ". " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Indexa un documento directamente en Elasticsearch con retry.
+     */
+    private void indexDocumentInElasticsearch(String entityId, String json, String indexName) {
+        // Verificar si el circuit breaker está abierto
+        if (circuitBreaker.isOpen()) {
+            logger.error("[CIRCUIT BREAKER OPEN] Rejecting document {} to index '{}'. Status: {}", 
+                       entityId, indexName, circuitBreaker.getStatus());
+            documentsFailedPermanently.incrementAndGet();
+            return;
+        }
+        
+        boolean retry = true;
+        int retries = 0;
+        int millis = 1000;
+        
+        while (retry && retries < maxRetries) {
+            try {
+                IndexRequest request = new IndexRequest(indexName)
+                    .id(entityId)
+                    .source(json, XContentType.JSON);
+                    
+                elasticClient.index(request, RequestOptions.DEFAULT);
+                
+                // Éxito - registrar y resetear circuit breaker si estaba con fallos
+                documentsIndexed.incrementAndGet();
+                circuitBreaker.recordSuccess();
+                logger.debug("Document indexed successfully: {}", entityId);
+                return;
+                
+            } catch (IOException e) {
+                retries++;
+                circuitBreaker.recordFailure();
+                
+                if (retries >= maxRetries) {
+                    logger.error("Failed to index document {} after {} retries: {}", 
+                               entityId, maxRetries, e.getMessage());
+                    documentsFailedPermanently.incrementAndGet();
+                    retry = false;
+                } else {
+                    logger.warn("Retry {}/{} for document {}: {}", retries, maxRetries, entityId, e.getMessage());
+                    try {
+                        Thread.sleep(millis);
+                        millis *= 2; // Exponential backoff
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        retry = false;
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public void prePage() throws EntityIndexingException {
+       }
+
+    @Override
+    public void index(Entity entity) throws EntityIndexingException {
+        if (shutdown) {
+            throw new EntityIndexingException("Indexer is shutting down");
+        }
+        
+        // Solo capturar el UUID - el worker cargará la entidad completa en su propia transacción
+        final UUID entityId = entity.getId();
+        logger.debug("Queueing entity for async processing: {}", entityId);
+        
+        try {
+            // Adquirir permiso del semáforo antes de encolar
+            concurrentTasksSemaphore.acquire();
+            logger.debug("Acquired semaphore permit for entity: {} (available: {})", 
+                        entityId, concurrentTasksSemaphore.availablePermits());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new EntityIndexingException("Interrupted while waiting for processing slot for entity: " + entityId);
+        }
+        
+        // Registrar este hilo en el phaser
+        activeIndexingPhaser.register();
+        logger.debug("Registered with phaser. Current parties: {}", activeIndexingPhaser.getRegisteredParties());
+        
+        try {
+            // Enviar solo el UUID al executor - cada worker manejará todo el proceso
+            CompletableFuture.runAsync(() -> {
+                try {
+                    logger.debug("Worker thread starting for entity: {}", entityId);
+                    
+                    // El worker carga la entidad, genera JSON e indexa en Elasticsearch
+                    // Todo en UNA SOLA transacción read-only garantizando lazy loading
+                    processEntityInTransaction(entityId);
+                    
+                    logger.debug("Worker thread completed for entity: {}", entityId);
+                    
+                } catch (Exception e) {
+                    logger.error("Error in worker thread for entity {}: {}", entityId, e.getMessage(), e);
+                } finally {
+                    // Liberar semáforo y desregistrar del phaser
+                    concurrentTasksSemaphore.release();
+                    activeIndexingPhaser.arriveAndDeregister();
+                    logger.debug("Released semaphore and deregistered from phaser for entity: {} (available: {})", 
+                                entityId, concurrentTasksSemaphore.availablePermits());
+                }
+            }, indexingExecutor);
+            
+            // El método retorna inmediatamente - el trabajo se hace en el worker thread
+            logger.debug("Entity {} queued for async processing", entityId);
+            
+        } catch (Exception e) {
+            // Si hay error en el setup, liberar semáforo y desregistrar del phaser
+            concurrentTasksSemaphore.release();
+            activeIndexingPhaser.arriveAndDeregister();
+            logger.error("Error setting up async processing for entity {}: {}", entity.getId(), e.getMessage(), e);
+            throw new EntityIndexingException("Error queueing entity for async processing: " + entity.getId() + ". " + e.getMessage());
         }
     }
 
@@ -721,7 +589,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         synchronized (flushLock) {
             logger.info("Starting flush operation...");
 
-            // 1. Wait for all active indexing tasks (producers) to finish.
+            // Wait for all active indexing tasks to finish
             logger.info("Waiting for active indexing threads to complete...");
             int phase = activeIndexingPhaser.arrive();
             try {
@@ -731,19 +599,20 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 logger.warn("Interrupted while waiting for indexing threads to complete");
                 return;
             }
-            logger.info("All indexing threads have completed.");
-
-            // 2. Send a flush marker and wait for all writers to process it.
-            CountDownLatch flushLatch = new CountDownLatch(writerThreads.size());
-            try {
-                documentBuffer.put(new FlushMarker(flushLatch));
-                logger.info("Flush marker sent, waiting for writers to complete...");
-                flushLatch.await(60, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.warn("Interrupted while waiting for writers to flush");
-                return;
+            
+            // Reportar estadísticas finales cuando todos los tasks terminan
+            ProcessingStats finalStats = getProcessingStats();
+            logger.info("All indexing tasks completed successfully.");
+            logger.info("Final indexing statistics - Documents produced: {}, indexed: {}, failed: {}",
+                       finalStats.getDocumentsProduced(),
+                       finalStats.getDocumentsIndexed(), 
+                       finalStats.getDocumentsFailed());
+            
+            if (finalStats.getDocumentsFailed() > 0) {
+                logger.warn("Some documents failed permanently during indexing. Failed count: {}", 
+                           finalStats.getDocumentsFailed());
             }
+            
             logger.info("Flush operation completed successfully.");
         }
     }
@@ -767,50 +636,10 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             // 1. Flush any remaining work
             flush();
 
-            // 2. Send poison pills to all output queues
-            for (BlockingQueue<Object> queue : outputQueues) {
-                try {
-                    queue.put(POISON_PILL);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    logger.warn("Interrupted while sending poison pill");
-                }
-            }
-
-            // 3. Wait for all writer threads to finish
-            for (Thread t : writerThreads) {
-                try {
-                    t.join(30000); // 30 second timeout
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    logger.warn("Interrupted while waiting for writer thread to finish");
-                }
-            }
-
-            // 4. Wait for distributor thread to finish
-            if (distributorThread != null) {
-                try {
-                    distributorThread.join(30000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    logger.warn("Interrupted while waiting for distributor thread to finish");
-                }
-            }
-
-            // 5. Close all writers
-            for (Closeable writer : writers) {
-                try {
-                    writer.close();
-                } catch (IOException e) {
-                    logger.error("Error closing writer: " + e.getMessage(), e);
-                }
-            }
-
-            // 6. Shutdown executors
+            // 2. Shutdown indexing executor
             shutdownExecutor(indexingExecutor, "IndexingExecutor");
-            shutdownExecutor(utilityExecutor, "UtilityExecutor");
 
-            // 7. Close Elasticsearch client
+            // 3. Close Elasticsearch client
             if (elasticClient != null) {
                 try {
                     elasticClient.close();
@@ -854,150 +683,68 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     }
     
     /**
-     * Reprocesa documentos desde el Dead Letter Queue.
-     * Intenta reindexar documentos que fallaron anteriormente.
-     * 
-     * @param maxDocuments Número máximo de documentos a reprocesar (0 = todos)
-     * @return Número de documentos reprocesados exitosamente
-     */
-    public int reprocessDeadLetterQueue(int maxDocuments) {
-        if (deadLetterQueue == null || deadLetterQueue.isEmpty()) {
-            logger.info("Dead Letter Queue is empty, nothing to reprocess");
-            return 0;
-        }
-        
-        int processed = 0;
-        int failed = 0;
-        int limit = maxDocuments > 0 ? maxDocuments : Integer.MAX_VALUE;
-        
-        logger.info("Starting DLQ reprocessing. Queue size: {}, limit: {}", 
-                   deadLetterQueue.size(), maxDocuments > 0 ? maxDocuments : "unlimited");
-        
-        while (processed + failed < limit && !deadLetterQueue.isEmpty()) {
-            DeadLetterItem item = deadLetterQueue.poll();
-            if (item == null) break;
-            
-            try {
-                // Verificar edad del item - no reprocesar items muy antiguos (configurable)
-                long ageMs = System.currentTimeMillis() - item.getTimestamp();
-                
-                if (ageMs > dlqMaxAgeMs) {
-                    logger.warn("Dropping old DLQ item (age: {}ms, max: {}ms): {}", ageMs, dlqMaxAgeMs, item);
-                    failed++;
-                    continue;
-                }
-                
-                // Verificar reintentos - no reprocesar items con demasiados reintentos (configurable)
-                if (item.getRetryCount() >= dlqMaxRetries) {
-                    logger.warn("Dropping DLQ item with too many retries ({}/{}): {}", 
-                              item.getRetryCount(), dlqMaxRetries, item);
-                    failed++;
-                    continue;
-                }
-                
-                ElasticDocument doc = item.getDocument();
-                if (doc != null && doc.getEntity() != null) {
-                    // Intentar reindexar el documento
-                    documentBuffer.offer(doc);
-                    documentsReprocessedFromDLQ.incrementAndGet();
-                    processed++;
-                    logger.debug("Reprocessed DLQ item: {}", item);
-                } else {
-                    logger.warn("DLQ item has null document or entity: {}", item);
-                    failed++;
-                }
-                
-            } catch (Exception e) {
-                logger.error("Error reprocessing DLQ item: {} - {}", item, e.getMessage());
-                // Devolver al DLQ con retry incrementado
-                DeadLetterItem retryItem = item.incrementRetry();
-                if (!deadLetterQueue.offer(retryItem)) {
-                    logger.error("Failed to return item to DLQ: {}", item);
-                }
-                failed++;
-            }
-        }
-        
-        logger.info("DLQ reprocessing completed. Processed: {}, Failed: {}, Remaining: {}", 
-                   processed, failed, deadLetterQueue.size());
-        return processed;
-    }
-
-    /**
      * Obtener estadísticas del procesamiento actual
      */
     public ProcessingStats getProcessingStats() {
         return new ProcessingStats(
-                documentBuffer != null ? documentBuffer.size() : 0,
-                bufferSize,
                 Math.max(0, activeIndexingPhaser.getRegisteredParties() - 1),
                 documentsProduced.get(),
-                documentsConsumed.get(),
                 documentsIndexed.get(),
                 documentsFailedPermanently.get(),
                 concurrentTasksSemaphore.availablePermits(),
                 maxConcurrentTasks,
-                circuitBreaker != null ? circuitBreaker.getStatus() : "NOT INITIALIZED",
-                documentsSentToDLQ.get(),
-                documentsReprocessedFromDLQ.get(),
-                deadLetterQueue != null ? deadLetterQueue.size() : 0
+                circuitBreaker != null ? circuitBreaker.getStatus() : "NOT INITIALIZED"
         );
+    }
+    
+    /**
+     * Imprime un reporte detallado del estado actual de indexación.
+     * Útil para monitoreo manual o debugging.
+     */
+    public void logCurrentStatus() {
+        ProcessingStats stats = getProcessingStats();
+        logger.info("=== INDEXING STATUS REPORT ===");
+        logger.info("Active Tasks: {}", stats.getActiveTasks());
+        logger.info("Available Slots: {}/{}", stats.getAvailableSlots(), stats.getMaxSlots());
+        logger.info("Documents Produced: {}", stats.getDocumentsProduced());
+        logger.info("Documents Indexed: {}", stats.getDocumentsIndexed());
+        logger.info("Documents Failed: {}", stats.getDocumentsFailed());
+        logger.info("Circuit Breaker Status: {}", stats.getCircuitBreakerStatus());
+        logger.info("============================");
     }
 
     /**
      * Clase para estadísticas de procesamiento
      */
     public static class ProcessingStats {
-        private final int bufferSize;
-        private final int bufferCapacity;
         private final int activeTasks;
         private final long documentsProduced;
-        private final long documentsConsumed;
         private final long documentsIndexed;
         private final long documentsFailed;
         private final int availableSlots;
         private final int maxSlots;
         private final String circuitBreakerStatus;
-        private final long documentsSentToDLQ;
-        private final long documentsReprocessedFromDLQ;
-        private final int dlqSize;
 
-        public ProcessingStats(int bufferSize, int bufferCapacity, int activeTasks, long documentsProduced, 
-                             long documentsConsumed, long documentsIndexed, long documentsFailed,
-                             int availableSlots, int maxSlots, String circuitBreakerStatus,
-                             long documentsSentToDLQ, long documentsReprocessedFromDLQ, int dlqSize) {
-            this.bufferSize = bufferSize;
-            this.bufferCapacity = bufferCapacity;
+        public ProcessingStats(int activeTasks, long documentsProduced, 
+                             long documentsIndexed, long documentsFailed,
+                             int availableSlots, int maxSlots, String circuitBreakerStatus) {
             this.activeTasks = activeTasks;
             this.documentsProduced = documentsProduced;
-            this.documentsConsumed = documentsConsumed;
             this.documentsIndexed = documentsIndexed;
             this.documentsFailed = documentsFailed;
             this.availableSlots = availableSlots;
             this.maxSlots = maxSlots;
             this.circuitBreakerStatus = circuitBreakerStatus;
-            this.documentsSentToDLQ = documentsSentToDLQ;
-            this.documentsReprocessedFromDLQ = documentsReprocessedFromDLQ;
-            this.dlqSize = dlqSize;
         }
 
-        public int getBufferSize() { return bufferSize; }
-        public int getBufferCapacity() { return bufferCapacity; }
         public int getActiveTasks() { return activeTasks; }
         public long getDocumentsProduced() { return documentsProduced; }
-        public long getDocumentsConsumed() { return documentsConsumed; }
         public long getDocumentsIndexed() { return documentsIndexed; }
         public long getDocumentsFailed() { return documentsFailed; }
         public int getAvailableSlots() { return availableSlots; }
         public int getMaxSlots() { return maxSlots; }
         public int getUsedSlots() { return maxSlots - availableSlots; }
         public String getCircuitBreakerStatus() { return circuitBreakerStatus; }
-        public long getDocumentsSentToDLQ() { return documentsSentToDLQ; }
-        public long getDocumentsReprocessedFromDLQ() { return documentsReprocessedFromDLQ; }
-        public int getDlqSize() { return dlqSize; }
-        public double getBufferUsagePercentage() { 
-            return bufferCapacity > 0 ? (bufferSize * 100.0) / bufferCapacity : 0.0; 
-        }
     }
 
     // --- ELASTIC SPECIFIC METHODS ---
@@ -1214,363 +961,4 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         }
     }
 
-    /**
-     * Item en el Dead Letter Queue con información de auditoría.
-     */
-    private static class DeadLetterItem {
-        private final ElasticDocument document;
-        private final String failureReason;
-        private final long timestamp;
-        private final int retryCount;
-        private final String lastError;
-        
-        public DeadLetterItem(ElasticDocument document, String failureReason, String lastError) {
-            this(document, failureReason, lastError, 0);
-        }
-        
-        public DeadLetterItem(ElasticDocument document, String failureReason, String lastError, int retryCount) {
-            this.document = document;
-            this.failureReason = failureReason;
-            this.lastError = lastError;
-            this.timestamp = System.currentTimeMillis();
-            this.retryCount = retryCount;
-        }
-        
-        public ElasticDocument getDocument() { return document; }
-        public String getFailureReason() { return failureReason; }
-        public String getLastError() { return lastError; }
-        public long getTimestamp() { return timestamp; }
-        public int getRetryCount() { return retryCount; }
-        
-        public DeadLetterItem incrementRetry() {
-            return new DeadLetterItem(document, failureReason, lastError, retryCount + 1);
-        }
-        
-        @Override
-        public String toString() {
-            return String.format("DeadLetterItem[doc=%s, reason=%s, retries=%d, age=%dms]",
-                               document != null && document.getEntity() != null ? document.getEntity().getId() : "null",
-                               failureReason, retryCount, 
-                               System.currentTimeMillis() - timestamp);
-        }
-    }
-
-    /**
-     * Document wrapper para threading
-     */
-    private static class ElasticDocument {
-        private final JSONEntityElastic entity;
-        private final String indexName;
-
-        public ElasticDocument(JSONEntityElastic entity, String indexName) {
-            this.entity = entity;
-            this.indexName = indexName;
-        }
-
-        public JSONEntityElastic getEntity() { return entity; }
-        public String getIndexName() { return indexName; }
-    }
-
-    /**
-     * The Distributor thread takes items from the main buffer and distributes them
-     * to output queues using intelligent load balancing for optimal Elasticsearch performance.
-     */
-    private class Distributor implements Runnable {
-        private int currentQueueIndex = 0;
-        private final Map<String, Integer> indexToWriterMapping = new HashMap<>();
-        
-        @Override
-        public void run() {
-            logger.info("Distributor thread started with {} Elasticsearch writers.", outputQueues.size());
-            try {
-                while (true) {
-                    Object item = documentBuffer.take();
-                    documentsConsumed.incrementAndGet();
-
-                    if (item == POISON_PILL) {
-                        logger.info("Distributor received poison pill, shutting down.");
-                        break;
-                    }
-
-                    if (item instanceof FlushMarker) {
-                        // FlushMarkers need to go to all queues
-                        for (BlockingQueue<Object> queue : outputQueues) {
-                            queue.put(item);
-                        }
-                    } else if (item instanceof ElasticDocument) {
-                        // Use index-aware distribution for better performance
-                        ElasticDocument doc = (ElasticDocument) item;
-                        int targetWriter = getTargetWriter(doc.getIndexName());
-                        BlockingQueue<Object> selectedQueue = outputQueues.get(targetWriter);
-                        selectedQueue.put(item);
-                    } else {
-                        // Fallback to round-robin for other items
-                        BlockingQueue<Object> selectedQueue = outputQueues.get(currentQueueIndex);
-                        selectedQueue.put(item);
-                        currentQueueIndex = (currentQueueIndex + 1) % outputQueues.size();
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.info("Distributor thread interrupted.");
-            } catch (Exception e) {
-                logger.error("Error in distributor thread: " + e.getMessage(), e);
-            } finally {
-                logger.info("Distributor thread finished.");
-            }
-        }
-        
-        /**
-         * Get target writer for a specific index, ensuring documents for the same index
-         * tend to go to the same writer for better bulk operation efficiency.
-         */
-        private int getTargetWriter(String indexName) {
-            return indexToWriterMapping.computeIfAbsent(indexName, 
-                k -> Math.abs(k.hashCode()) % outputQueues.size());
-        }
-    }
-
-    /**
-     * Abstract base class for writer threads.
-     */
-    private abstract class AbstractWriter implements Runnable, Closeable {
-        protected final BlockingQueue<Object> queue;
-        protected final List<ElasticDocument> localBuffer;
-        protected final int batchSize = 100; // Tamaño de lote para Elasticsearch
-        protected final long maxWaitTimeMs = 5000; // Máximo tiempo de espera para escribir
-
-        protected AbstractWriter(BlockingQueue<Object> queue) {
-            this.queue = queue;
-            this.localBuffer = new ArrayList<>(batchSize);
-        }
-
-        @Override
-        public void run() {
-            logger.info("Writer thread started: " + Thread.currentThread().getName());
-            try {
-                long lastWriteTime = System.currentTimeMillis();
-                
-                while (true) {
-                    Object item = queue.poll(1000, TimeUnit.MILLISECONDS);
-                    
-                    if (item == POISON_PILL) {
-                        logger.info("Writer received poison pill, flushing and shutting down.");
-                        writeBatch();
-                        break;
-                    }
-                    
-                    if (item instanceof FlushMarker) {
-                        logger.debug("Writer received flush marker, flushing batch.");
-                        writeBatch();
-                        ((FlushMarker) item).latch.countDown();
-                        continue;
-                    }
-                    
-                    if (item instanceof ElasticDocument) {
-                        localBuffer.add((ElasticDocument) item);
-                    }
-                    
-                    // Write batch if buffer is full or timeout reached
-                    long currentTime = System.currentTimeMillis();
-                    if (localBuffer.size() >= batchSize || 
-                        (localBuffer.size() > 0 && (currentTime - lastWriteTime) > maxWaitTimeMs)) {
-                        writeBatch();
-                        lastWriteTime = currentTime;
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                logger.info("Writer thread interrupted: " + Thread.currentThread().getName());
-            } catch (Exception e) {
-                logger.error("Error in writer thread: " + e.getMessage(), e);
-            } finally {
-                logger.info("Writer thread finished: " + Thread.currentThread().getName());
-            }
-        }
-
-        private void writeBatch() {
-            if (localBuffer.isEmpty()) return;
-            
-            try {
-                performWrite(new ArrayList<>(localBuffer));
-                documentsIndexed.addAndGet(localBuffer.size());
-                localBuffer.clear();
-            } catch (Exception e) {
-                logger.error("Error writing batch: " + e.getMessage(), e);
-            }
-        }
-
-        protected abstract void performWrite(List<ElasticDocument> batch);
-    }
-
-    /**
-     * Writer for Elasticsearch with concurrent indexing support.
-     */
-    private class ElasticWriter extends AbstractWriter {
-        private final int writerId;
-        
-        ElasticWriter(BlockingQueue<Object> queue, int writerId) {
-            super(queue);
-            this.writerId = writerId;
-        }
-        
-        /**
-         * Envía un batch fallido al Dead Letter Queue para permitir recuperación posterior.
-         * Extrae los documentos del BulkRequest y los envía individualmente al DLQ.
-         */
-        private void sendBatchToDLQ(BulkRequest bulkRequest, String indexName, 
-                                    String failureReason, Exception lastException) {
-            String errorMsg = lastException != null ? 
-                            lastException.getClass().getSimpleName() + ": " + lastException.getMessage() :
-                            "No exception details";
-            
-            int sentCount = 0;
-            int droppedCount = 0;
-            
-            // Extraer documentos del BulkRequest
-            for (Object request : bulkRequest.requests()) {
-                if (request instanceof IndexRequest) {
-                    IndexRequest indexRequest = (IndexRequest) request;
-                    
-                    // Recrear ElasticDocument desde IndexRequest (limitado)
-                    // Nota: No tenemos acceso al objeto Entity original, solo al JSON serializado
-                    ElasticDocument doc = new ElasticDocument(null, indexName);
-                    
-                    DeadLetterItem dlqItem = new DeadLetterItem(doc, failureReason, errorMsg);
-                    
-                    // Intentar agregar al DLQ (non-blocking)
-                    if (deadLetterQueue.offer(dlqItem)) {
-                        sentCount++;
-                    } else {
-                        droppedCount++;
-                        logger.error("Writer-{}: DLQ FULL! Dropping document ID: {} (index: {}). " +
-                                   "DLQ capacity: {}, current size: {}", 
-                                   writerId, indexRequest.id(), indexName, 
-                                   dlqCapacity, deadLetterQueue.size());
-                    }
-                }
-            }
-            
-            if (sentCount > 0) {
-                documentsSentToDLQ.addAndGet(sentCount);
-                logger.warn("Writer-{}: Sent {} documents to DLQ (reason: {}). DLQ size: {}/{}", 
-                          writerId, sentCount, failureReason, deadLetterQueue.size(), dlqCapacity);
-            }
-            
-            if (droppedCount > 0) {
-                logger.error("Writer-{}: PERMANENT DATA LOSS! Dropped {} documents (DLQ full). " +
-                           "Consider increasing elastic.indexer.dlq.capacity or processing DLQ more frequently.", 
-                           writerId, droppedCount);
-            }
-        }
-
-        @Override
-        protected void performWrite(List<ElasticDocument> batch) {
-            if (batch.isEmpty()) return;
-            
-            // Group documents by index for more efficient bulk operations
-            Map<String, List<ElasticDocument>> documentsByIndex = new HashMap<>();
-            for (ElasticDocument doc : batch) {
-                documentsByIndex.computeIfAbsent(doc.getIndexName(), k -> new ArrayList<>()).add(doc);
-            }
-            
-            // Process each index separately for better performance
-            for (Map.Entry<String, List<ElasticDocument>> entry : documentsByIndex.entrySet()) {
-                String indexName = entry.getKey();
-                List<ElasticDocument> indexDocuments = entry.getValue();
-                
-                BulkRequest bulkRequest = new BulkRequest();
-                bulkRequest.timeout("5m");
-                
-                for (ElasticDocument doc : indexDocuments) {
-                    try {
-                        IndexRequest indexRequest = new IndexRequest(indexName);
-                        indexRequest.id(doc.getEntity().getId());
-                        indexRequest.source(jsonMapper.writeValueAsString(doc.getEntity()), XContentType.JSON);
-                        bulkRequest.add(indexRequest);
-                    } catch (JsonProcessingException e) {
-                        logger.error("Writer-{}: Error serializing document to JSON: {}", writerId, e.getMessage(), e);
-                    }
-                }
-                
-                if (bulkRequest.numberOfActions() == 0) continue;
-                
-                // Execute bulk request with retry logic
-                executeBulkWithRetry(bulkRequest, indexName, indexDocuments.size());
-            }
-        }
-        
-        private void executeBulkWithRetry(BulkRequest bulkRequest, String indexName, int documentCount) {
-            // Verificar si el circuit breaker está abierto
-            if (circuitBreaker.isOpen()) {
-                logger.error("Writer-{}: [CIRCUIT BREAKER OPEN] Rejecting bulk request to index '{}' ({} documents). " +
-                           "Status: {}", 
-                           writerId, indexName, documentCount, circuitBreaker.getStatus());
-                // Enviar documentos al DLQ en lugar de perderlos
-                sendBatchToDLQ(bulkRequest, indexName, "Circuit breaker open", null);
-                documentsFailedPermanently.addAndGet(documentCount);
-                return;
-            }
-            
-            Boolean retry = true;
-            int retries = 0;
-            int millis = 1000; // Start with shorter delay for better responsiveness
-            Exception lastException = null;
-            
-            while (retry) {
-                try {
-                    BulkResponse bulkResponse = elasticClient.bulk(bulkRequest, RequestOptions.DEFAULT);
-                    logger.debug("Writer-{}: Bulk request to index '{}' completed: {} ({} documents)", 
-                               writerId, indexName, bulkResponse.status().toString(), documentCount);
-                    
-                    // Operación exitosa - registrar en circuit breaker
-                    circuitBreaker.recordSuccess();
-                    retry = false;
-                    
-                    if (bulkResponse.hasFailures()) {
-                        logger.warn("Writer-{}: Bulk request to index '{}' has partial failures: {}", 
-                                  writerId, indexName, bulkResponse.buildFailureMessage());
-                        // Partial failures no cuentan como fallo total del circuit breaker
-                    }
-                    
-                } catch (Exception e) {
-                    lastException = e;
-                    logger.warn("Writer-{}: Retrying bulk request to index '{}': {} -- Warning: {} {}", 
-                              writerId, indexName, retries, e.getClass().getSimpleName(), e.getMessage());
-                    
-                    // Registrar fallo en circuit breaker
-                    circuitBreaker.recordFailure();
-                    
-                    try { 
-                        Thread.sleep(millis); 
-                    } catch (InterruptedException se) {
-                        Thread.currentThread().interrupt();
-                        logger.warn("Writer-{}: Interrupted during retry delay", writerId);
-                        break;
-                    }
-                    
-                    retries++;
-                    millis = Math.min(millis * 2, 10000); // Cap maximum delay at 10 seconds
-                    
-                    if (retries > maxRetries) {
-                        logger.error("Writer-{}: Bulk request to index '{}' failed after {} retries: {} {}. " +
-                                   "Circuit breaker status: {}", 
-                                   writerId, indexName, maxRetries, e.getClass().getSimpleName(), 
-                                   e.getMessage(), circuitBreaker.getStatus());
-                        
-                        // Enviar documentos al DLQ para permitir recuperación
-                        sendBatchToDLQ(bulkRequest, indexName, 
-                                     "Max retries exceeded (" + maxRetries + ")", lastException);
-                        documentsFailedPermanently.addAndGet(documentCount);
-                        retry = false;
-                    }
-                }
-            }
-        }
-
-        @Override
-        public void close() {
-            logger.info("Writer-{}: Elasticsearch writer closed", writerId);
-        }
-    }
 }
