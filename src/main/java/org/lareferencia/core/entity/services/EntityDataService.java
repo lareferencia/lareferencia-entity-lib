@@ -72,6 +72,7 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -80,6 +81,7 @@ import org.w3c.dom.Document;
 import lombok.Getter;
 import lombok.Setter;
 
+@Service
 public class EntityDataService {
 
 	private static Logger logger = LogManager.getLogger(EntityDataService.class);

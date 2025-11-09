@@ -110,6 +110,13 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- H2 Database for in-memory testing -->
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
+			<scope>test</scope>
+		</dependency>
+
 		<dependency>
 			<groupId>com.google.guava</groupId>
 			<artifactId>guava</artifactId>

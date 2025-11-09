@@ -158,6 +158,9 @@ public class EntityRelationUnitTests {
    	
     	entity = entityRepository.getOne( entityID );
     	
+    	// Load occurrences map to trigger lazy loading
+    	entity.getOccurrencesAsMap();
+    	
     	// check that there is only one occrs of field name and its john
     	Collection<FieldOccurrence> occrs = entity.getFieldOccurrences("name");
     	assertThat(occrs.size()).isEqualTo(1);
@@ -182,6 +185,7 @@ public class EntityRelationUnitTests {
     	// Adding john again should have no effect (because the value is the same)
     	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("john");
     	entity.addFieldOccurrence(occrName);
+    	entity.getOccurrencesAsMap(); // Reload map after adding occurrence
     	occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(1); // still size 1
 
@@ -189,18 +193,21 @@ public class EntityRelationUnitTests {
     	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("john");
     	occrName.setLang("en");
      	entity.addFieldOccurrence(occrName);
+    	entity.getOccurrencesAsMap(); // Reload map after adding occurrence
     	occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(2); // must be 2
 
     	// Now we add a completely different value, peter 
     	occrName = entity.getEntityType().getFieldByName("name").buildFieldOccurrence().addValue("peter");
     	entity.addFieldOccurrence(occrName);
+    	entity.getOccurrencesAsMap(); // Reload map after adding occurrence
     	occrs = entity.getFieldOccurrences("name");
     	assertThat( occrs.size() ).isEqualTo(3); // must be 3
 
     	// Now we add the same value but to a different field 
     	occrPID = entity.getEntityType().getFieldByName("pid").buildFieldOccurrence().addValue("john");
     	entity.addFieldOccurrence(occrPID);
+    	entity.getOccurrencesAsMap(); // Reload map after adding occurrence
 
     	occrs = entity.getFieldOccurrences("name");
     	assertThat(occrs.size()).isEqualTo(3); // must still be 3
@@ -214,6 +221,9 @@ public class EntityRelationUnitTests {
     	 */
     	
     	entity = entityRepository.getOne( entityID );
+    	
+    	// Load occurrences map to trigger lazy loading
+    	entity.getOccurrencesAsMap();
     	
     	occrs = entity.getFieldOccurrences("name");
     	assertThat(occrs.size()).isEqualTo(3); // name occrs size must be 3
