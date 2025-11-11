@@ -20,23 +20,28 @@
 
 package org.lareferencia.core.entity.workers;
 
+import java.io.IOException;
 import java.text.NumberFormat;
+import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.lareferencia.backend.domain.OAIRecord;
+import org.lareferencia.backend.domain.parquet.RecordValidation;
+import org.lareferencia.backend.repositories.parquet.ValidationStatParquetRepository;
 import org.lareferencia.backend.services.SnapshotLogService;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.lareferencia.core.metadata.IMDFormatTransformer;
-import org.lareferencia.core.metadata.IMetadataRecordStoreService;
+import org.lareferencia.core.metadata.IMetadataStore;
+import org.lareferencia.core.metadata.ISnapshotStore;
 import org.lareferencia.core.metadata.MDFormatTranformationException;
 import org.lareferencia.core.metadata.MDFormatTransformerService;
+import org.lareferencia.core.metadata.MetadataRecordStoreException;
 import org.lareferencia.core.metadata.OAIRecordMetadata;
-import org.lareferencia.core.util.IRecordFingerprintHelper;
+import org.lareferencia.core.metadata.OAIRecordMetadataParseException;
+import org.lareferencia.core.metadata.RecordStatus;
+import org.lareferencia.core.metadata.SnapshotMetadata;
 import org.lareferencia.core.util.Profiler;
-import org.lareferencia.core.util.date.DateHelper;
-import org.lareferencia.core.worker.BaseBatchWorker;
-import org.lareferencia.core.worker.IPaginator;
+import org.lareferencia.core.worker.BaseWorker;
 import org.lareferencia.core.worker.NetworkRunningContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.w3c.dom.Document;
@@ -44,7 +49,7 @@ import org.w3c.dom.Document;
 import lombok.Getter;
 import lombok.Setter;
 
-public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRunningContext> {
+public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 
 	private static Logger logger = LogManager.getLogger(EntityExtractionWorker.class);
 
@@ -52,17 +57,25 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 	private SnapshotLogService snapshotLogService;
 
 	@Autowired
+	private ISnapshotStore snapshotStore;
+
+	@Autowired
+	private IMetadataStore metadataStore;
+
+	@Autowired
+	private ValidationStatParquetRepository parquetRepository;
+
+	@Autowired
 	EntityDataService erService;
 	
-	@Autowired
-	private IMetadataRecordStoreService metadataStoreService;
-	
 	private Long snapshotId;
+	private SnapshotMetadata snapshotMetadata;
+	List<RecordValidation> recordsToProcess;
+	Integer currentRecordIndex = 0;
+	Integer totalRecords = 0;
+	Integer pageSize = 1000;
 
 	NumberFormat percentajeFormat = NumberFormat.getPercentInstance();
-	
-	@Autowired
-	private IRecordFingerprintHelper fingerprintHelper;
 
 	private IMDFormatTransformer metadataTransformer;
 	
@@ -96,77 +109,99 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 		super();
 	}
 
-	@Override
 	public void preRun() {
 		
-			initialTime = System.nanoTime();
-		
-			// busca el lgk
-			snapshotId = metadataStoreService.findLastGoodKnownSnapshot(runningContext.getNetwork()); // snpshotRepository.findLastGoodKnowByNetworkID(runningContext.getNetwork().getId());
+		initialTime = System.nanoTime();
+	
+		// busca el lgk
+		snapshotId = snapshotStore.findLastGoodKnownSnapshot(runningContext.getNetwork());
 
-			if ( snapshotId != null ) { // solo si existe un lgk
+		if ( snapshotId != null ) { // solo si existe un lgk
 
-				// establece una paginator para recorrer los registros que no sean inválidos
-				IPaginator<OAIRecord> paginator = metadataStoreService.getValidRecordsPaginator(snapshotId);
-				paginator.setPageSize(this.getPageSize());
-				this.setPaginator(paginator);
-				
-				
-				// establece el transformador para indexación
-				try {
-					metadataTransformer = trfService.getMDTransformer(runningContext.getNetwork().getMetadataStoreSchema(), targetSchemaName);
-					metadataTransformer.setParameter("networkAcronym", runningContext.getNetwork().getAcronym() );
-					logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: STARTED");
+			snapshotMetadata = snapshotStore.getSnapshotMetadata(snapshotId);
 
-				} catch (MDFormatTranformationException e) {
-					logError( runningContext.toString() + " EntityExtraction Worker :: Error on loading metadata transformer services : " + runningContext.getNetwork().getMetadataStoreSchema() + "2" + targetSchemaName  + " :: CANCELLED");
-					this.setPaginator( null );
-					error();
-				}
-				
-				
-								
-			} else {
+			logger.debug("Full entity extraction on snapshot: " + snapshotId);
+			logInfo("Full entity extraction: "+ runningContext.toString() +" (" + this.targetSchemaName + ")");
 
-				logError( "There aren't any LGKSnapshot for the network: " + runningContext.toString() + " :: CANCELLED" );
-				this.setPaginator( null );
+			// Obtiene los registros válidos desde Parquet
+			try {
+				recordsToProcess = parquetRepository.getRecordValidationListBySnapshotAndStatus(snapshotId, RecordStatus.VALID);	
+				totalRecords = recordsToProcess.size();
+
+				// establece el transformador para extracción de entidades
+				metadataTransformer = trfService.getMDTransformer(runningContext.getNetwork().getMetadataStoreSchema(), targetSchemaName);
+				metadataTransformer.setParameter("networkAcronym", runningContext.getNetwork().getAcronym() );
+				logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: STARTED");
+
+			} catch (MDFormatTranformationException e) {
+				logError( runningContext.toString() + " EntityExtraction Worker :: Error on loading metadata transformer services : " + runningContext.getNetwork().getMetadataStoreSchema() + "2" + targetSchemaName  + " :: CANCELLED");
+				error();
+			} catch (IOException e) {
+				logError("I/O ERROR at entity extraction: " + runningContext.toString() + " " 
+						+ runningContext.getNetwork().getMetadataStoreSchema() + " >> " + targetSchemaName 
+						+ " error: " + e.getMessage());
 				error();
 			}
-			
-			
-			// cache setting
-//			if ( entityCacheSize != null && entityCacheSize > 0) {
-//				logInfo(runningContext.toString() + " Creating entity cache ...");	
-//				this.entityCache.setCapacity(entityCacheSize);
-//				this.erService.setEntityCache(this.entityCache);
-//			}
-			
-			
 
-			
+		} else {
+
+			logError( "There aren't any LGKSnapshot for the network: " + runningContext.toString() + " :: CANCELLED" );
+			error();
+		}
+		
+		// cache setting
+//		if ( entityCacheSize != null && entityCacheSize > 0) {
+//			logInfo(runningContext.toString() + " Creating entity cache ...");	
+//			this.entityCache.setCapacity(entityCacheSize);
+//			this.erService.setEntityCache(this.entityCache);
+//		}
+	}
+
+	@Override
+	public void run() {
+
+		preRun();
+
+		if (currentRecordIndex == 0)
+			prePage();
+
+		recordsToProcess.forEach( record -> {
+			currentRecordIndex += 1;
+			processItem(record);
+
+			if ( currentRecordIndex % pageSize == 0 ) {
+				logger.debug("Entity extraction progress " + runningContext.getNetwork().getAcronym() + "::" + this.targetSchemaName 
+						+ " :: " + percentajeFormat.format(this.getCompletionRate()) 
+						+ " (" + currentRecordIndex + " / " + totalRecords + " records processed)" );
+
+				postPage();
+				prePage();
+			}
+		});
+
+		postRun();
 	}
 
 
-	@Override
 	public void prePage() {
 		
 		startTime = System.nanoTime();
 
 	}
 
-	@Override
-	public void processItem(OAIRecord record) {
+	public void processItem(RecordValidation record) {
 		
 		try {
 			
-			OAIRecordMetadata metadata = metadataStoreService.getPublishedMetadata(record);
+			OAIRecordMetadata metadata = new OAIRecordMetadata( record.getIdentifier(), 
+								metadataStore.getMetadata( record.getPublishedMetadataHash()) ); 
 			
-			profiler = new Profiler(profileMode, "Record internalID: " + record.getId() + " ").start();
+			profiler = new Profiler(profileMode, "Record internalID: " + record.getRecordId() + " ").start();
 			
 			// record parameters to transformer
-			metadataTransformer.setParameter("fingerprint", fingerprintHelper.getFingerprint(record) );
+			metadataTransformer.setParameter("fingerprint", snapshotMetadata.getNetworkAcronym() + "_" + record.getRecordId() );
 			metadataTransformer.setParameter("identifier", record.getIdentifier());
-			metadataTransformer.setParameter("timestamp", DateHelper.getDateTimeMachineString(record.getDatestamp()) );
+			// Note: timestamp not available in RecordValidation, using current time or omitting
 			
 			Document recordMetadataDocument = metadata.getDOMDocument();
 			Document entityDataDocument =  metadataTransformer.transform(recordMetadataDocument);
@@ -184,27 +219,29 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 			profiler.report(logger);
 			
 			
+		} catch (OAIRecordMetadataParseException e) {
+			String msg = "Error parsing metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
+			logError(msg);
+		} catch (MetadataRecordStoreException e) {
+			String msg = "Error retrieving metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
+			logError(msg);
 		} catch (Exception e) {
-			
-			String msg = "Error processing record internalID: " + record.getId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
-			//e.printStackTrace();
+			String msg = "Error processing record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
 			logError(msg);
 		}
 		
 	}
 
 
-	@Override
 	public void postPage() {
 		
 		endTime   = System.nanoTime();
 		
 		long totalTime = endTime - startTime;
-		logInfo( runningContext.toString() + String.format(" Extracting and persisting entities from %s metadata records to db took: %sms", this.getPageSize(),totalTime/1000000) );
+		logInfo( runningContext.toString() + String.format(" Extracting and persisting entities from %s metadata records to db took: %sms", pageSize, totalTime/1000000) );
 
 	}
 
-	@Override
 	public void postRun() {
 		
 //		if ( entityCacheSize != null && entityCacheSize > 0) {
@@ -215,7 +252,7 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 		logInfo(runningContext.toString() + " Now merge needs to be done in shell.");
 		//erService.mergeEntityRelationData();
 		
-		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: FINISHED - exectute the merge action in shell");
+		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: FINISHED - execute the merge action in shell");
 		
 		
 		long finalTime = System.nanoTime();  
@@ -228,6 +265,13 @@ public class EntityExtractionWorker extends BaseBatchWorker<OAIRecord, NetworkRu
 	@Override
 	public String toString() {
 		return  "EntityMapper[" + percentajeFormat.format(this.getCompletionRate()) + "]"; 
+	}	
+
+	Double getCompletionRate() {
+		if ( totalRecords == 0 )
+			return 0.0;
+		else
+			return ( currentRecordIndex.doubleValue() / totalRecords.doubleValue() );
 	}	
 
 	/******************* Auxiliares ********** */
