@@ -34,7 +34,8 @@ import org.lareferencia.core.entity.indexing.service.EntityIndexingException;
 import org.lareferencia.core.entity.indexing.service.EntityIndexingService;
 import org.lareferencia.core.entity.indexing.service.IEntityIndexer;
 import org.lareferencia.core.entity.services.EntityDataService;
-import org.lareferencia.core.metadata.IMetadataRecordStoreService;
+import org.lareferencia.core.metadata.IMetadataStore;
+import org.lareferencia.core.metadata.ISnapshotStore;
 import org.lareferencia.core.metadata.RecordStatus;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.worker.BaseBatchWorker;
@@ -78,12 +79,14 @@ public class NetworkEntityIndexingWorker extends BaseBatchWorker<String, Network
 	
 	@Autowired
 	EntityIndexingService indexingService;
+
+    @Autowired
+	ISnapshotStore snapshotStore;
+	
 	
 	IPaginator<String> identifierPaginator;
 
-	@Autowired
-	IMetadataRecordStoreService metadataStoreService;
-	
+
 	IEntityIndexer indexer;
 
 	private Profiler profiler;
@@ -104,7 +107,7 @@ public class NetworkEntityIndexingWorker extends BaseBatchWorker<String, Network
 		
 		
 		networkAcronym = runningContext.getNetwork().getAcronym();
-		Long snapshotId = metadataStoreService.findLastGoodKnownSnapshot(runningContext.getNetwork()); 
+		Long snapshotId = snapshotStore.findLastGoodKnownSnapshot(runningContext.getNetwork());
 
 		if (snapshotId != null) { // solo si existe un lgk
 

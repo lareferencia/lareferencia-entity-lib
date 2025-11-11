@@ -194,7 +194,7 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 		try {
 			
 			OAIRecordMetadata metadata = new OAIRecordMetadata( record.getIdentifier(), 
-								metadataStore.getMetadata( record.getPublishedMetadataHash()) ); 
+				metadataStore.getMetadata(snapshotMetadata, record.getPublishedMetadataHash()) ); 
 			
 			profiler = new Profiler(profileMode, "Record internalID: " + record.getRecordId() + " ").start();
 			
