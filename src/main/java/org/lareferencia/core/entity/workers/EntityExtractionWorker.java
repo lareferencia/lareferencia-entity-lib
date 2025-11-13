@@ -199,7 +199,7 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 			profiler = new Profiler(profileMode, "Record internalID: " + record.getRecordId() + " ").start();
 			
 			// record parameters to transformer
-			metadataTransformer.setParameter("fingerprint", snapshotMetadata.getNetworkAcronym() + "_" + record.getRecordId() );
+			metadataTransformer.setParameter("fingerprint", snapshotMetadata.getNetwork().getAcronym() + "_" + record.getRecordId() );
 			metadataTransformer.setParameter("identifier", record.getIdentifier());
 			// Note: timestamp not available in RecordValidation, using current time or omitting
 			
