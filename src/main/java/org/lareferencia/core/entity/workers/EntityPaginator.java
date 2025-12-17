@@ -35,83 +35,86 @@ import lombok.Getter;
 import java.time.LocalDateTime;
 
 public class EntityPaginator implements IPaginator<Entity> {
-	
+
 	private static Logger logger = LogManager.getLogger(EntityPaginator.class);
-	
+
 	private static final int DEFAULT_PAGE_SIZE = 1000;
 
 	@Getter
-	private int pageSize = DEFAULT_PAGE_SIZE;	
-	
+	private int pageSize = DEFAULT_PAGE_SIZE;
+
 	EntityRepository entityRepository;
 	EntityType entityType;
 	String provenanceSource;
 	private LocalDateTime lastUdate = null;
-	
+
 	private int totalPages = 0;
 
 	private int actualPage = 1;
 
 	@Override
-	public int getStartingPage() { return actualPage; }
-	
-	Page<Entity> page = null;
+	public int getStartingPage() {
+		return actualPage;
+	}
 
+	Page<Entity> page = null;
 
 	public EntityPaginator(EntityRepository repository, EntityType entityType) {
 		actualPage = 1;
 		this.entityType = entityType;
 		this.entityRepository = repository;
-		logger.debug( "Creating entity type paginator: " + entityType.getName()  );
+		logger.debug("Creating entity type paginator: " + entityType.getName());
 		obtainPage();
 	}
-	
+
 	public EntityPaginator(EntityRepository repository) {
 		actualPage = 1;
 		this.entityRepository = repository;
-		logger.debug( "Creating entity type paginator: ALL Entitties :: " );
+		logger.debug("Creating entity type paginator: ALL Entitties :: ");
 		obtainPage();
 	}
-	
-	public EntityPaginator(EntityRepository repository, String provenanceSource ) {
+
+	public EntityPaginator(EntityRepository repository, String provenanceSource) {
 		actualPage = 1;
 		this.entityRepository = repository;
 		this.provenanceSource = provenanceSource;
-		logger.debug( "Creating entity type paginator:: Entities from proveance source :: " + provenanceSource );
+		logger.debug("Creating entity type paginator:: Entities from proveance source :: " + provenanceSource);
 		obtainPage();
 	}
 
-	public EntityPaginator(EntityRepository repository, LocalDateTime lastUpdate ) {
+	public EntityPaginator(EntityRepository repository, LocalDateTime lastUpdate) {
 		actualPage = 1;
 		this.entityRepository = repository;
 		this.lastUdate = lastUpdate;
-		logger.debug( "Creating entity type paginator:: Entities from last update :: " + lastUpdate );
+		logger.debug("Creating entity type paginator:: Entities from last update :: " + lastUpdate);
 
 		obtainPage();
 	}
 
-	public EntityPaginator(EntityRepository repository, EntityType entityType, String provenanceSource ) {
+	public EntityPaginator(EntityRepository repository, EntityType entityType, String provenanceSource) {
 		actualPage = 1;
 		this.entityRepository = repository;
 		this.entityType = entityType;
 		this.provenanceSource = provenanceSource;
-		logger.debug( "Creating entity type paginator:: Entities of type " + entityType.getName() + " from proveance source :: " + provenanceSource );
+		logger.debug("Creating entity type paginator:: Entities of type " + entityType.getName()
+				+ " from proveance source :: " + provenanceSource);
 		obtainPage();
 	}
 
-	public EntityPaginator(EntityRepository repository, EntityType entityType, LocalDateTime lastUpdate ) {
+	public EntityPaginator(EntityRepository repository, EntityType entityType, LocalDateTime lastUpdate) {
 		actualPage = 1;
 		this.entityRepository = repository;
 		this.entityType = entityType;
 		this.lastUdate = lastUpdate;
-		logger.debug( "Creating entity type paginator:: Entities of type " + entityType.getName() + " from last update :: " + lastUpdate );
+		logger.debug("Creating entity type paginator:: Entities of type " + entityType.getName()
+				+ " from last update :: " + lastUpdate);
 		obtainPage();
 	}
-	
+
 	@Override
 	public void setPageSize(int newsize) {
-		
-		if ( newsize != this.pageSize ) {
+
+		if (newsize != this.pageSize) {
 			this.pageSize = newsize;
 			actualPage = 1;
 			obtainPage();
@@ -122,42 +125,47 @@ public class EntityPaginator implements IPaginator<Entity> {
 		this.actualPage = actualPage;
 		obtainPage();
 	}
-	
+
 	private Page<Entity> obtainPage() {
-					
+
 		page = null;
-		Pageable pageable = PageRequest.of(actualPage-1, pageSize);
-		
-		if ( entityType != null )
-			if ( provenanceSource != null )
-				page = entityRepository.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(false, entityType.getId(), provenanceSource, pageable);
+		Pageable pageable = PageRequest.of(actualPage - 1, pageSize);
+
+		if (entityType != null)
+			if (provenanceSource != null)
+				page = entityRepository
+						.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(false,
+								entityType.getId(), provenanceSource, pageable);
+			else if (lastUdate != null)
+				page = entityRepository
+						.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(
+								false, entityType.getId(), lastUdate, pageable);
 			else
-				if ( lastUdate != null )
-					page = entityRepository.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, entityType.getId(), lastUdate, pageable);
-				else
-					page = entityRepository.findDistinctEntityByDirtyAndEntityTypeOrderByIdAsc(false, entityType, pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndEntityTypeOrderByIdAsc(false, entityType, pageable);
+		else if (provenanceSource != null)
+			page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(false,
+					provenanceSource, pageable);
+		else if (lastUdate != null)
+			page = entityRepository
+					.findDistinctEntityByDirtyAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false,
+							lastUdate, pageable);
 		else
-			if ( provenanceSource != null )
-				page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(false, provenanceSource, pageable);
-			else
-				if ( lastUdate != null )
-					page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, lastUdate, pageable);
-				else
-					page = entityRepository.findDistinctEntityByDirtyOrderByIdAsc(false, pageable);
-		
+			page = entityRepository.findDistinctEntityByDirtyOrderByIdAsc(false, pageable);
+
 		this.totalPages = page.getTotalPages();
 		return page;
-		
-	}
-	
 
+	}
+
+	@Override
 	public int getTotalPages() {
 		return totalPages;
 	}
 
-	public Page<Entity> nextPage() { 
-		
-		if (actualPage <= totalPages) {			
+	@Override
+	public Page<Entity> nextPage() {
+
+		if (actualPage <= totalPages) {
 			Page<Entity> page = obtainPage();
 			actualPage++;
 			return page;

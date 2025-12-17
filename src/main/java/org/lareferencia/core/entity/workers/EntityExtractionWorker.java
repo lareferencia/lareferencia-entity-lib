@@ -26,9 +26,12 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.flowable.common.engine.api.delegate.Expression;
+import org.flowable.engine.delegate.DelegateExecution;
 import org.lareferencia.core.repository.parquet.RecordValidation;
 import org.lareferencia.core.repository.parquet.ValidationStatParquetRepository;
 import org.lareferencia.core.service.management.SnapshotLogService;
+import org.lareferencia.core.domain.Network;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.lareferencia.core.metadata.IMDFormatTransformer;
 import org.lareferencia.core.metadata.IMetadataStore;
@@ -41,15 +44,18 @@ import org.lareferencia.core.metadata.OAIRecordMetadataParseException;
 import org.lareferencia.core.metadata.RecordStatus;
 import org.lareferencia.core.metadata.SnapshotMetadata;
 import org.lareferencia.core.util.Profiler;
-import org.lareferencia.core.worker.BaseWorker;
-import org.lareferencia.core.worker.NetworkRunningContext;
+import org.lareferencia.core.worker.AbstractFlowableWorker;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Scope;
+import org.springframework.stereotype.Component;
 import org.w3c.dom.Document;
 
 import lombok.Getter;
 import lombok.Setter;
 
-public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
+@Component("entityExtractionWorker")
+@Scope("prototype")
+public class EntityExtractionWorker extends AbstractFlowableWorker {
 
 	private static Logger logger = LogManager.getLogger(EntityExtractionWorker.class);
 
@@ -67,226 +73,184 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 
 	@Autowired
 	EntityDataService erService;
-	
-	private Long snapshotId;
-	private SnapshotMetadata snapshotMetadata;
-	List<RecordValidation> recordsToProcess;
-	Integer currentRecordIndex = 0;
-	Integer totalRecords = 0;
-	Integer pageSize = 1000;
+
+	@Autowired
+	MDFormatTransformerService trfService;
+
+	// Flowable Expressions
+	private Expression targetSchemaName;
+	private Expression debugMode;
+	private Expression profileMode;
+	private Expression entityCacheSize;
 
 	NumberFormat percentajeFormat = NumberFormat.getPercentInstance();
 
-	private IMDFormatTransformer metadataTransformer;
-	
-	@Autowired
-	MDFormatTransformerService trfService;
-	
-	@Getter @Setter
-	private String targetSchemaName;
+	private static class ExtractionContext {
+		Network network;
+		Long snapshotId;
+		SnapshotMetadata snapshotMetadata;
+		List<RecordValidation> recordsToProcess;
+		Integer currentRecordIndex = 0;
+		Integer totalRecords = 0;
+		Integer pageSize = 1000;
+		IMDFormatTransformer metadataTransformer;
+		Profiler profiler;
 
-	@Getter @Setter
-	private boolean debugMode = false;
-	
-	@Getter @Setter
-	private boolean profileMode = false;
-	
-	@Getter @Setter
-	private Integer entityCacheSize = null;
-	
-//	@Autowired
-//	EntityLRUCache entityCache;
-//	
-	private Profiler profiler;
+		String targetSchemaNameStr;
+		boolean debugModeBool = false;
+		boolean profileModeBool = false;
+		Integer entityCacheSizeInt = null;
 
-
-	private long initialTime;
-	private long startTime;
-	private long endTime;
-	
-
-	public EntityExtractionWorker() {
-		super();
+		long initialTime;
+		long startTime;
+		long endTime;
 	}
 
-	public void preRun() {
-		
-		initialTime = System.nanoTime();
-	
-		// busca el lgk
-		snapshotId = snapshotStore.findLastGoodKnownSnapshot(runningContext.getNetwork());
+	@Override
+	protected void executeWorker(DelegateExecution execution) throws Exception {
 
-		if ( snapshotId != null ) { // solo si existe un lgk
+		if (this.network == null) {
+			throw new IllegalStateException("EntityExtractionWorker requires a valid Network context");
+		}
 
-			snapshotMetadata = snapshotStore.getSnapshotMetadata(snapshotId);
+		ExtractionContext context = new ExtractionContext();
+		context.network = this.network;
+		context.initialTime = System.nanoTime();
 
-			logger.debug("Full entity extraction on snapshot: " + snapshotId);
-			logInfo("Full entity extraction: "+ runningContext.toString() +" (" + this.targetSchemaName + ")");
+		// Parameter resolution
+		if (targetSchemaName != null)
+			context.targetSchemaNameStr = (String) targetSchemaName.getValue(execution);
+		if (debugMode != null)
+			context.debugModeBool = (Boolean) debugMode.getValue(execution);
+		if (profileMode != null)
+			context.profileModeBool = (Boolean) profileMode.getValue(execution);
+		if (entityCacheSize != null)
+			context.entityCacheSizeInt = ((Number) entityCacheSize.getValue(execution)).intValue();
 
-			// Obtiene los registros válidos desde Parquet
+		// --- Pre Run ---
+		context.snapshotId = snapshotStore.findLastGoodKnownSnapshot(context.network);
+
+		if (context.snapshotId != null) {
+			context.snapshotMetadata = snapshotStore.getSnapshotMetadata(context.snapshotId);
+
+			logger.debug("Full entity extraction on snapshot: " + context.snapshotId);
+			logInfo("Full entity extraction: " + context.network.getAcronym() + " (" + context.targetSchemaNameStr
+					+ ")");
+
 			try {
-				recordsToProcess = parquetRepository.getRecordValidationListBySnapshotAndStatus(snapshotId, RecordStatus.VALID);	
-				totalRecords = recordsToProcess.size();
+				context.recordsToProcess = parquetRepository
+						.getRecordValidationListBySnapshotAndStatus(context.snapshotId, RecordStatus.VALID);
+				context.totalRecords = context.recordsToProcess.size();
 
-				// establece el transformador para extracción de entidades
-				metadataTransformer = trfService.getMDTransformer(runningContext.getNetwork().getMetadataStoreSchema(), targetSchemaName);
-				metadataTransformer.setParameter("networkAcronym", runningContext.getNetwork().getAcronym() );
-				logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: STARTED");
+				context.metadataTransformer = trfService.getMDTransformer(context.network.getMetadataStoreSchema(),
+						context.targetSchemaNameStr);
+				context.metadataTransformer.setParameter("networkAcronym", context.network.getAcronym());
+				logInfo(context.network.getName() + " EntityRelation worker extraction on snapshot:"
+						+ context.snapshotId + " :: STARTED");
 
-			} catch (MDFormatTranformationException e) {
-				logError( runningContext.toString() + " EntityExtraction Worker :: Error on loading metadata transformer services : " + runningContext.getNetwork().getMetadataStoreSchema() + "2" + targetSchemaName  + " :: CANCELLED");
-				error();
-			} catch (IOException e) {
-				logError("I/O ERROR at entity extraction: " + runningContext.toString() + " " 
-						+ runningContext.getNetwork().getMetadataStoreSchema() + " >> " + targetSchemaName 
-						+ " error: " + e.getMessage());
-				error();
+				// --- Run Loop ---
+				context.startTime = System.nanoTime(); // Pre Page 1
+
+				for (RecordValidation record : context.recordsToProcess) {
+					context.currentRecordIndex += 1;
+					processItem(record, context); // Process Item
+
+					if (context.currentRecordIndex % context.pageSize == 0) {
+						logger.debug("Entity extraction progress " + context.network.getAcronym() + "::"
+								+ context.targetSchemaNameStr
+								+ " :: " + getCompletionRate(context)
+								+ " (" + context.currentRecordIndex + " / " + context.totalRecords
+								+ " records processed)");
+
+						// Post Page equivalent
+						context.endTime = System.nanoTime();
+						long totalTime = context.endTime - context.startTime;
+						logInfo("Extracting and persisting entities from " + context.pageSize
+								+ " metadata records to db took: " + (totalTime / 1000000) + "ms");
+
+						// Pre Page equivalent
+						context.startTime = System.nanoTime();
+					}
+				}
+
+				// --- Post Run ---
+				logInfo(context.network.getName() + " Now merge needs to be done in shell.");
+				logInfo(context.network.getName() + " EntityRelation worker extraction on snapshot:"
+						+ context.snapshotId + " :: FINISHED");
+
+				long finalTime = System.nanoTime();
+				long totalTime = finalTime - context.initialTime;
+				logInfo(context.network.getName() + String.format(" Extracting took: %s secs", totalTime / 1000000000));
+
+			} catch (Exception e) {
+				logError("Error in entity extraction: " + e.getMessage());
+				throw e;
 			}
 
 		} else {
-
-			logError( "There aren't any LGKSnapshot for the network: " + runningContext.toString() + " :: CANCELLED" );
-			error();
+			logError("There aren't any LGKSnapshot for the network: " + context.network.getAcronym());
+			// Should we throw?
 		}
-		
-		// cache setting
-//		if ( entityCacheSize != null && entityCacheSize > 0) {
-//			logInfo(runningContext.toString() + " Creating entity cache ...");	
-//			this.entityCache.setCapacity(entityCacheSize);
-//			this.erService.setEntityCache(this.entityCache);
-//		}
 	}
 
-	@Override
-	public void run() {
+	private void processItem(RecordValidation record, ExtractionContext context) {
 
-		preRun();
-
-		if (currentRecordIndex == 0)
-			prePage();
-
-		recordsToProcess.forEach( record -> {
-			currentRecordIndex += 1;
-			processItem(record);
-
-			if ( currentRecordIndex % pageSize == 0 ) {
-				logger.debug("Entity extraction progress " + runningContext.getNetwork().getAcronym() + "::" + this.targetSchemaName 
-						+ " :: " + percentajeFormat.format(this.getCompletionRate()) 
-						+ " (" + currentRecordIndex + " / " + totalRecords + " records processed)" );
-
-				postPage();
-				prePage();
-			}
-		});
-
-		postRun();
-	}
-
-
-	public void prePage() {
-		
-		startTime = System.nanoTime();
-
-	}
-
-	public void processItem(RecordValidation record) {
-		
 		try {
-			
-			OAIRecordMetadata metadata = new OAIRecordMetadata( record.getIdentifier(), 
-				metadataStore.getMetadata(snapshotMetadata, record.getPublishedMetadataHash()) ); 
-			
-			profiler = new Profiler(profileMode, "Record internalID: " + record.getRecordId() + " ").start();
-			
+			// Using getMetadata method which might throw exceptions
+			OAIRecordMetadata metadata = new OAIRecordMetadata(record.getIdentifier(),
+					metadataStore.getMetadata(context.snapshotMetadata, record.getPublishedMetadataHash()));
+
+			// Profiler usage adapted
+			context.profiler = new Profiler(context.profileModeBool, "Record internalID: " + record.getRecordId() + " ")
+					.start();
+
 			// record parameters to transformer
-			metadataTransformer.setParameter("fingerprint", snapshotMetadata.getNetwork().getAcronym() + "_" + record.getRecordId() );
-			metadataTransformer.setParameter("identifier", record.getIdentifier());
-			// Note: timestamp not available in RecordValidation, using current time or omitting
-			
+			context.metadataTransformer.setParameter("fingerprint",
+					context.snapshotMetadata.getNetwork().getAcronym() + "_" + record.getRecordId());
+			context.metadataTransformer.setParameter("identifier", record.getIdentifier());
+
 			Document recordMetadataDocument = metadata.getDOMDocument();
-			Document entityDataDocument =  metadataTransformer.transform(recordMetadataDocument);
-			
-			profiler.messure("RecordXML2EntityXML", false);
-					
-			if ( debugMode ) {
-				logger.info( metadata.toString() );
-				logger.info( metadataTransformer.transformToString(metadata.getDOMDocument()) );
+			Document entityDataDocument = context.metadataTransformer.transform(recordMetadataDocument);
+
+			context.profiler.messure("RecordXML2EntityXML", false);
+
+			if (context.debugModeBool) {
+				logger.info(metadata.toString());
+				logger.info(context.metadataTransformer.transformToString(metadata.getDOMDocument()));
 			}
-			
-			erService.setProfiler(profiler);
+
+			erService.setProfiler(context.profiler);
 			erService.parseAndPersistEntityRelationDataFromXMLDocument(entityDataDocument, false);
-			
-			profiler.report(logger);
-			
-			
-		} catch (OAIRecordMetadataParseException e) {
-			String msg = "Error parsing metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
-			logError(msg);
-		} catch (MetadataRecordStoreException e) {
-			String msg = "Error retrieving metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
-			logError(msg);
+
+			context.profiler.report(logger);
+
 		} catch (Exception e) {
-			String msg = "Error processing record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
-			logError(msg);
+			String msg = "Error processing record internalID: " + record.getRecordId() + " -- identifier: "
+					+ record.getIdentifier() + " -- msg: " + e.getMessage();
+			logError(msg, context);
 		}
-		
 	}
 
-
-	public void postPage() {
-		
-		endTime   = System.nanoTime();
-		
-		long totalTime = endTime - startTime;
-		logInfo( runningContext.toString() + String.format(" Extracting and persisting entities from %s metadata records to db took: %sms", pageSize, totalTime/1000000) );
-
+	private String getCompletionRate(ExtractionContext context) {
+		if (context.totalRecords == 0)
+			return percentajeFormat.format(0.0);
+		return percentajeFormat.format(context.currentRecordIndex.doubleValue() / context.totalRecords.doubleValue());
 	}
-
-	public void postRun() {
-		
-//		if ( entityCacheSize != null && entityCacheSize > 0) {
-//			logInfo(runningContext.toString() + " Persisting entity cache ...");	
-//			entityCache.syncAndClose();
-//		}
-		
-		logInfo(runningContext.toString() + " Now merge needs to be done in shell.");
-		//erService.mergeEntityRelationData();
-		
-		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: FINISHED - execute the merge action in shell");
-		
-		
-		long finalTime = System.nanoTime();  
-		long totalTime = finalTime - initialTime;
-		logInfo( runningContext.toString() + String.format(" Extracting took: %s secs", totalTime/1000000000) );
-
-		
-	}
-	
-	@Override
-	public String toString() {
-		return  "EntityMapper[" + percentajeFormat.format(this.getCompletionRate()) + "]"; 
-	}	
-
-	Double getCompletionRate() {
-		if ( totalRecords == 0 )
-			return 0.0;
-		else
-			return ( currentRecordIndex.doubleValue() / totalRecords.doubleValue() );
-	}	
 
 	/******************* Auxiliares ********** */
-	private void error() {
-		this.stop();
-	}
 
 	private void logError(String message) {
 		logger.error(message);
-		snapshotLogService.addEntry(snapshotId, "ERROR: " + message);		
+	}
+
+	private void logError(String message, ExtractionContext context) {
+		logger.error(message);
+		if (context != null && context.snapshotId != null)
+			snapshotLogService.addEntry(context.snapshotId, "ERROR: " + message);
 	}
 
 	private void logInfo(String message) {
 		logger.info(message);
-		snapshotLogService.addEntry(snapshotId, "INFO: " + message);		
 	}
 
 }
