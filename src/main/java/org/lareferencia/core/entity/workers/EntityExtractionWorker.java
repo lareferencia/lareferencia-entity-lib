@@ -23,11 +23,13 @@ package org.lareferencia.core.entity.workers;
 import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.lareferencia.core.repository.parquet.RecordValidation;
-import org.lareferencia.core.repository.parquet.ValidationStatParquetRepository;
+import org.lareferencia.core.repository.validation.ValidationRecord;
+import org.lareferencia.core.repository.validation.RecordValidationRepository;
 import org.lareferencia.core.service.management.SnapshotLogService;
 import org.lareferencia.core.entity.services.EntityDataService;
 import org.lareferencia.core.metadata.IMDFormatTransformer;
@@ -38,7 +40,7 @@ import org.lareferencia.core.metadata.MDFormatTransformerService;
 import org.lareferencia.core.metadata.MetadataRecordStoreException;
 import org.lareferencia.core.metadata.OAIRecordMetadata;
 import org.lareferencia.core.metadata.OAIRecordMetadataParseException;
-import org.lareferencia.core.metadata.RecordStatus;
+
 import org.lareferencia.core.metadata.SnapshotMetadata;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.worker.BaseWorker;
@@ -63,14 +65,14 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 	private IMetadataStore metadataStore;
 
 	@Autowired
-	private ValidationStatParquetRepository parquetRepository;
+	private RecordValidationRepository recordRepository;
 
 	@Autowired
 	EntityDataService erService;
-	
+
 	private Long snapshotId;
 	private SnapshotMetadata snapshotMetadata;
-	List<RecordValidation> recordsToProcess;
+	List<ValidationRecord> recordsToProcess;
 	Integer currentRecordIndex = 0;
 	Integer totalRecords = 0;
 	Integer pageSize = 1000;
@@ -78,83 +80,90 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 	NumberFormat percentajeFormat = NumberFormat.getPercentInstance();
 
 	private IMDFormatTransformer metadataTransformer;
-	
+
 	@Autowired
 	MDFormatTransformerService trfService;
-	
-	@Getter @Setter
+
+	@Getter
+	@Setter
 	private String targetSchemaName;
 
-	@Getter @Setter
+	@Getter
+	@Setter
 	private boolean debugMode = false;
-	
-	@Getter @Setter
-	private boolean profileMode = false;
-	
-	@Getter @Setter
-	private Integer entityCacheSize = null;
-	
-//	@Autowired
-//	EntityLRUCache entityCache;
-//	
-	private Profiler profiler;
 
+	@Getter
+	@Setter
+	private boolean profileMode = false;
+
+	@Getter
+	@Setter
+	private Integer entityCacheSize = null;
+
+	// @Autowired
+	// EntityLRUCache entityCache;
+	//
+	private Profiler profiler;
 
 	private long initialTime;
 	private long startTime;
 	private long endTime;
-	
 
 	public EntityExtractionWorker() {
 		super();
 	}
 
 	public void preRun() {
-		
+
 		initialTime = System.nanoTime();
-	
+
 		// busca el lgk
 		snapshotId = snapshotStore.findLastGoodKnownSnapshot(runningContext.getNetwork());
 
-		if ( snapshotId != null ) { // solo si existe un lgk
+		if (snapshotId != null) { // solo si existe un lgk
 
 			snapshotMetadata = snapshotStore.getSnapshotMetadata(snapshotId);
 
 			logger.debug("Full entity extraction on snapshot: " + snapshotId);
-			logInfo("Full entity extraction: "+ runningContext.toString() +" (" + this.targetSchemaName + ")");
+			logInfo("Full entity extraction: " + runningContext.toString() + " (" + this.targetSchemaName + ")");
 
-			// Obtiene los registros válidos desde Parquet
-			try {
-				recordsToProcess = parquetRepository.getRecordValidationListBySnapshotAndStatus(snapshotId, RecordStatus.VALID);	
+			// Obtiene los registros válidos desde SQLite
+			try (Stream<ValidationRecord> stream = recordRepository.streamAll(snapshotId)) {
+				recordsToProcess = stream.filter(ValidationRecord::isValid).collect(Collectors.toList());
 				totalRecords = recordsToProcess.size();
 
 				// establece el transformador para extracción de entidades
-				metadataTransformer = trfService.getMDTransformer(runningContext.getNetwork().getMetadataStoreSchema(), targetSchemaName);
-				metadataTransformer.setParameter("networkAcronym", runningContext.getNetwork().getAcronym() );
-				logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: STARTED");
+				metadataTransformer = trfService.getMDTransformer(runningContext.getNetwork().getMetadataStoreSchema(),
+						targetSchemaName);
+				metadataTransformer.setParameter("networkAcronym", runningContext.getNetwork().getAcronym());
+				logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId
+						+ " :: STARTED");
 
 			} catch (MDFormatTranformationException e) {
-				logError( runningContext.toString() + " EntityExtraction Worker :: Error on loading metadata transformer services : " + runningContext.getNetwork().getMetadataStoreSchema() + "2" + targetSchemaName  + " :: CANCELLED");
+				logError(runningContext.toString()
+						+ " EntityExtraction Worker :: Error on loading metadata transformer services : "
+						+ runningContext.getNetwork().getMetadataStoreSchema() + "2" + targetSchemaName
+						+ " :: CANCELLED");
 				error();
 			} catch (IOException e) {
-				logError("I/O ERROR at entity extraction: " + runningContext.toString() + " " 
-						+ runningContext.getNetwork().getMetadataStoreSchema() + " >> " + targetSchemaName 
+				logError("I/O ERROR at entity extraction: " + runningContext.toString() + " "
+						+ runningContext.getNetwork().getMetadataStoreSchema() + " >> " + targetSchemaName
 						+ " error: " + e.getMessage());
 				error();
 			}
 
 		} else {
 
-			logError( "There aren't any LGKSnapshot for the network: " + runningContext.toString() + " :: CANCELLED" );
+			logError("There aren't any LGKSnapshot for the network: " + runningContext.toString() + " :: CANCELLED");
 			error();
 		}
-		
+
 		// cache setting
-//		if ( entityCacheSize != null && entityCacheSize > 0) {
-//			logInfo(runningContext.toString() + " Creating entity cache ...");	
-//			this.entityCache.setCapacity(entityCacheSize);
-//			this.erService.setEntityCache(this.entityCache);
-//		}
+		// if ( entityCacheSize != null && entityCacheSize > 0) {
+		// logInfo(runningContext.toString() + " Creating entity cache ...");
+		// this.entityCache.setCapacity(entityCacheSize);
+		// this.erService.setEntityCache(this.entityCache);
+		// }
 	}
 
 	@Override
@@ -165,114 +174,120 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 		if (currentRecordIndex == 0)
 			prePage();
 
-		recordsToProcess.forEach( record -> {
-			currentRecordIndex += 1;
-			processItem(record);
+		if (recordsToProcess != null) {
+			recordsToProcess.forEach(record -> {
+				currentRecordIndex += 1;
+				processItem(record);
 
-			if ( currentRecordIndex % pageSize == 0 ) {
-				logger.debug("Entity extraction progress " + runningContext.getNetwork().getAcronym() + "::" + this.targetSchemaName 
-						+ " :: " + percentajeFormat.format(this.getCompletionRate()) 
-						+ " (" + currentRecordIndex + " / " + totalRecords + " records processed)" );
+				if (currentRecordIndex % pageSize == 0) {
+					logger.debug("Entity extraction progress " + runningContext.getNetwork().getAcronym() + "::"
+							+ this.targetSchemaName
+							+ " :: " + percentajeFormat.format(this.getCompletionRate())
+							+ " (" + currentRecordIndex + " / " + totalRecords + " records processed)");
 
-				postPage();
-				prePage();
-			}
-		});
+					postPage();
+					prePage();
+				}
+			});
+		}
 
 		postRun();
 	}
 
-
 	public void prePage() {
-		
+
 		startTime = System.nanoTime();
 
 	}
 
-	public void processItem(RecordValidation record) {
-		
+	public void processItem(ValidationRecord record) {
+
 		try {
-			
-			OAIRecordMetadata metadata = new OAIRecordMetadata( record.getIdentifier(), 
-				metadataStore.getMetadata(snapshotMetadata, record.getPublishedMetadataHash()) ); 
-			
-			profiler = new Profiler(profileMode, "Record internalID: " + record.getRecordId() + " ").start();
-			
+
+			OAIRecordMetadata metadata = new OAIRecordMetadata(record.getIdentifier(),
+					metadataStore.getMetadata(snapshotMetadata, record.getPublishedMetadataHash()));
+
+			profiler = new Profiler(profileMode, "Record Identifier: " + record.getIdentifier() + " ").start();
+
 			// record parameters to transformer
-			metadataTransformer.setParameter("fingerprint", snapshotMetadata.getNetwork().getAcronym() + "_" + record.getRecordId() );
+			metadataTransformer.setParameter("fingerprint",
+					snapshotMetadata.getNetwork().getAcronym() + "_" + record.getIdentifier());
 			metadataTransformer.setParameter("identifier", record.getIdentifier());
-			// Note: timestamp not available in RecordValidation, using current time or omitting
-			
+			// Note: timestamp not available in ValidationRecord in the same way, using
+			// current time or omitting
+
 			Document recordMetadataDocument = metadata.getDOMDocument();
-			Document entityDataDocument =  metadataTransformer.transform(recordMetadataDocument);
-			
+			Document entityDataDocument = metadataTransformer.transform(recordMetadataDocument);
+
 			profiler.messure("RecordXML2EntityXML", false);
-					
-			if ( debugMode ) {
-				logger.info( metadata.toString() );
-				logger.info( metadataTransformer.transformToString(metadata.getDOMDocument()) );
+
+			if (debugMode) {
+				logger.info(metadata.toString());
+				logger.info(metadataTransformer.transformToString(metadata.getDOMDocument()));
 			}
-			
+
 			erService.setProfiler(profiler);
 			erService.parseAndPersistEntityRelationDataFromXMLDocument(entityDataDocument, false);
-			
+
 			profiler.report(logger);
-			
-			
+
 		} catch (OAIRecordMetadataParseException e) {
-			String msg = "Error parsing metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
+			String msg = "Error parsing metadata for record Identifier: " + record.getIdentifier() + " -- identifier: "
+					+ record.getIdentifier() + " -- msg: " + e.getMessage();
 			logError(msg);
 		} catch (MetadataRecordStoreException e) {
-			String msg = "Error retrieving metadata for record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
+			String msg = "Error retrieving metadata for record Identifier: " + record.getIdentifier()
+					+ " -- identifier: " + record.getIdentifier() + " -- msg: " + e.getMessage();
 			logError(msg);
 		} catch (Exception e) {
-			String msg = "Error processing record internalID: " + record.getRecordId() + " -- identifier: " +   record.getIdentifier() + " -- msg: " + e.getMessage() ;
+			String msg = "Error processing record Identifier: " + record.getIdentifier() + " -- identifier: "
+					+ record.getIdentifier() + " -- msg: " + e.getMessage();
 			logError(msg);
 		}
-		
+
 	}
 
-
 	public void postPage() {
-		
-		endTime   = System.nanoTime();
-		
+
+		endTime = System.nanoTime();
+
 		long totalTime = endTime - startTime;
-		logInfo( runningContext.toString() + String.format(" Extracting and persisting entities from %s metadata records to db took: %sms", pageSize, totalTime/1000000) );
+		logInfo(runningContext.toString()
+				+ String.format(" Extracting and persisting entities from %s metadata records to db took: %sms",
+						pageSize, totalTime / 1000000));
 
 	}
 
 	public void postRun() {
-		
-//		if ( entityCacheSize != null && entityCacheSize > 0) {
-//			logInfo(runningContext.toString() + " Persisting entity cache ...");	
-//			entityCache.syncAndClose();
-//		}
-		
-		logInfo(runningContext.toString() + " Now merge needs to be done in shell.");
-		//erService.mergeEntityRelationData();
-		
-		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId + " :: FINISHED - execute the merge action in shell");
-		
-		
-		long finalTime = System.nanoTime();  
-		long totalTime = finalTime - initialTime;
-		logInfo( runningContext.toString() + String.format(" Extracting took: %s secs", totalTime/1000000000) );
 
-		
+		// if ( entityCacheSize != null && entityCacheSize > 0) {
+		// logInfo(runningContext.toString() + " Persisting entity cache ...");
+		// entityCache.syncAndClose();
+		// }
+
+		logInfo(runningContext.toString() + " Now merge needs to be done in shell.");
+		// erService.mergeEntityRelationData();
+
+		logInfo(runningContext.toString() + " EntityRelation worker extraction on snapshot:" + snapshotId
+				+ " :: FINISHED - execute the merge action in shell");
+
+		long finalTime = System.nanoTime();
+		long totalTime = finalTime - initialTime;
+		logInfo(runningContext.toString() + String.format(" Extracting took: %s secs", totalTime / 1000000000));
+
 	}
-	
+
 	@Override
 	public String toString() {
-		return  "EntityMapper[" + percentajeFormat.format(this.getCompletionRate()) + "]"; 
-	}	
+		return "EntityMapper[" + percentajeFormat.format(this.getCompletionRate()) + "]";
+	}
 
 	Double getCompletionRate() {
-		if ( totalRecords == 0 )
+		if (totalRecords == 0)
 			return 0.0;
 		else
-			return ( currentRecordIndex.doubleValue() / totalRecords.doubleValue() );
-	}	
+			return (currentRecordIndex.doubleValue() / totalRecords.doubleValue());
+	}
 
 	/******************* Auxiliares ********** */
 	private void error() {
@@ -281,12 +296,12 @@ public class EntityExtractionWorker extends BaseWorker<NetworkRunningContext> {
 
 	private void logError(String message) {
 		logger.error(message);
-		snapshotLogService.addEntry(snapshotId, "ERROR: " + message);		
+		snapshotLogService.addEntry(snapshotId, "ERROR: " + message);
 	}
 
 	private void logInfo(String message) {
 		logger.info(message);
-		snapshotLogService.addEntry(snapshotId, "INFO: " + message);		
+		snapshotLogService.addEntry(snapshotId, "INFO: " + message);
 	}
 
 }
