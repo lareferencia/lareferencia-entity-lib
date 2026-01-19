@@ -126,13 +126,13 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
     @Value("${elastic.indexer.max.retries:10}")
     private int maxRetries;
-    
+
     @Value("${elastic.indexer.circuit.breaker.max.failures:10}")
     private int circuitBreakerMaxFailures;
-    
+
     @Value("${elastic.indexer.circuit.breaker.reset.timeout.ms:60000}")
     private long circuitBreakerResetTimeoutMs;
-    
+
     @Value("${elastic.indexer.max.concurrent.tasks:0}")
     private int maxConcurrentTasksConfig; // 0 = auto-calculate
 
@@ -149,11 +149,12 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     private final Phaser activeIndexingPhaser = new Phaser(1); // Tracks producer tasks
     private volatile boolean shutdown = false;
     private final Object flushLock = new Object();
-    
+
     // Configuração de threading
     private int indexingThreads = Runtime.getRuntime().availableProcessors();
-    
-    // Variables de threading (inicializadas en initializeThreading() con valores de configuración)
+
+    // Variables de threading (inicializadas en initializeThreading() con valores de
+    // configuración)
     private int maxConcurrentTasks;
     private Semaphore concurrentTasksSemaphore;
 
@@ -161,10 +162,10 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     private final AtomicLong documentsProduced = new AtomicLong(0);
     private final AtomicLong documentsIndexed = new AtomicLong(0);
     private final AtomicLong documentsFailedPermanently = new AtomicLong(0);
-    
+
     // Circuit Breaker para Elasticsearch
     private ElasticCircuitBreaker circuitBreaker;
-    
+
     public JSONElasticEntityIndexerThreadedImpl() {
         // Constructor
     }
@@ -173,10 +174,10 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     public void setConfig(String configFilePath) throws EntityIndexingException {
         try {
             logger.info("Loading indexing config from: " + configFilePath);
-            
+
             this.indexingConfigFilename = configFilePath;
             indexingConfiguration = IndexingConfiguration.loadFromXml(configFilePath);
-            
+
             logger.info("Processing Elastic Indexer Config File: " + indexingConfigFilename);
 
             // load filters for field occurrence filtering
@@ -206,24 +207,26 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
         } catch (Exception e) {
             logger.error("Error setting Elastic Indexer Config File: " + configFilePath + ". " + e.getMessage(), e);
-            throw new EntityIndexingException("Configuration failed for JSONElasticEntityIndexerThreadedImpl: " + e.getMessage());
+            throw new EntityIndexingException(
+                    "Configuration failed for JSONElasticEntityIndexerThreadedImpl: " + e.getMessage());
         }
     }
 
     private void initializeThreading() {
         // Aplicar configuración externalizada con valores por defecto
         this.maxConcurrentTasks = maxConcurrentTasksConfig > 0 ? maxConcurrentTasksConfig : (indexingThreads * 2);
-        
+
         this.indexingExecutor = Executors.newFixedThreadPool(indexingThreads);
-        
+
         // Inicializar semáforo para limitar tareas concurrentes
         this.concurrentTasksSemaphore = new Semaphore(maxConcurrentTasks);
-        
-        // Inicializar Circuit Breaker para Elasticsearch con configuración externalizada
+
+        // Inicializar Circuit Breaker para Elasticsearch con configuración
+        // externalizada
         this.circuitBreaker = new ElasticCircuitBreaker(circuitBreakerMaxFailures, circuitBreakerResetTimeoutMs);
-        
-        logger.info("Threading initialized with {} indexing threads and max {} concurrent tasks.", 
-                   indexingThreads, maxConcurrentTasks);
+
+        logger.info("Threading initialized with {} indexing threads and max {} concurrent tasks.",
+                indexingThreads, maxConcurrentTasks);
     }
 
     /**
@@ -241,70 +244,82 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
      */
     private void processEntityInTransaction(UUID entityId) throws EntityIndexingException {
         logger.debug("Starting transaction for entity: {}", entityId);
-        
+
         // Crear transacción read-only optimizada
         DefaultTransactionDefinition def = new DefaultTransactionDefinition();
-        
+
         // OPTIMIZACIÓN: Marcar como read-only para mejor performance
         // - Hibernate: No flush automático, sin dirty checking
-        // - PostgreSQL: No genera WAL, no adquiere write locks, usa snapshots optimizados
+        // - PostgreSQL: No genera WAL, no adquiere write locks, usa snapshots
+        // optimizados
         // - Spring: Menor overhead en commit/rollback
-        // Ganancia esperada: ~20-30% más rápido en indexación masiva
         def.setReadOnly(true);
-        
-        // Usar READ_COMMITTED para prevenir dirty reads y garantizar lecturas consistentes
+
+        // Usar READ_COMMITTED para prevenir dirty reads y garantizar lecturas
+        // consistentes
         def.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
-        
-        // REQUIRES_NEW: Cada thread de indexación tiene su propia transacción independiente
+
+        // REQUIRES_NEW: Cada thread de indexación tiene su propia transacción
+        // independiente
         def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
-        
+
         // Timeout de 30 segundos para detectar problemas
         def.setTimeout(30);
-        
+
         TransactionStatus status = transactionManager.getTransaction(def);
         logger.debug("Read-only transaction started for entity: {}", entityId);
-        
+
+        String json = null;
+        String indexName = null;
+
         try {
             // 1. Cargar entidad desde la BD (dentro de la transacción)
             Optional<Entity> entityOpt = entityDataService.getEntityById(entityId);
             if (entityOpt.isEmpty()) {
-                logger.error("Entity not found: {}", entityId);
-                transactionManager.commit(status);
+                logger.warn("Entity not found: {}", entityId);
                 return;
             }
-            
+
             Entity entity = entityOpt.get();
             logger.debug("Entity loaded: {}", entityId);
-            
-            // 2. Generar documento Elasticsearch (dentro de transacción - lazy loading funciona)
-            String json = generateElasticDocument(entity);
-            
+
+            // 2. Generar documento Elasticsearch (dentro de transacción - lazy loading
+            // funciona)
+            json = generateElasticDocument(entity);
+
             // Obtener el nombre del índice
             EntityType type = entityModelCache.getObjectById(EntityType.class, entity.getEntityTypeId());
             EntityIndexingConfig entityIndexingConfig = configsByEntityType.get(type.getName());
-            String indexName = entityIndexingConfig != null ? entityIndexingConfig.getName() : null;
-            
+            indexName = entityIndexingConfig != null ? entityIndexingConfig.getName() : null;
+
             if (indexName == null) {
                 logger.warn("No indexing config found for entity type: {} (entity: {})", type.getName(), entityId);
-                transactionManager.commit(status);
                 return;
             }
-            
-            // 3. Commit de la transacción read-only (antes de indexar)
-            transactionManager.commit(status);
-            logger.debug("Read-only transaction committed for entity: {}", entityId);
+
             documentsProduced.incrementAndGet();
-            
-            // 4. Indexar directamente en Elasticsearch (fuera de transacción)
-            indexDocumentInElasticsearch(entityId.toString(), json, indexName);
-            
+            logger.debug("Entity {} processed, document generated", entityId);
+
         } catch (Exception e) {
-            transactionManager.rollback(status);
-            logger.error("Read-only transaction rolled back for entity {}: {}", entityId, e.getMessage(), e);
+            logger.error("Error processing entity in transaction {}: {}", entityId, e.getMessage(), e);
             throw new EntityIndexingException("Error processing entity: " + entityId + ". " + e.getMessage());
+        } finally {
+            // Para transacciones READ-ONLY, usamos rollback en lugar de commit:
+            // - Ambos son funcionalmente equivalentes (no hay datos que persistir)
+            // - rollback libera la conexión al pool igual que commit
+            // - Se garantiza que la transacción SIEMPRE se cierra (evita connection leaks)
+            if (!status.isCompleted()) {
+                transactionManager.rollback(status);
+                logger.debug("Read-only transaction closed for entity: {}", entityId);
+            }
+        }
+
+        // 3. Indexar directamente en Elasticsearch (fuera de transacción)
+        if (json != null && indexName != null) {
+            indexDocumentInElasticsearch(entityId.toString(), json, indexName);
         }
     }
-    
+
     /**
      * Genera el documento JSON de Elasticsearch para una entidad.
      * Este método procesa la entidad y todas sus relaciones anidadas.
@@ -335,7 +350,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
                 Collection<UUID> nestedRelatedEntityIds;
                 try {
-                    nestedRelatedEntityIds = entityDataService.getMemberRelatedEntitiesIds(entity.getId(), relationName, isFromMember);
+                    nestedRelatedEntityIds = entityDataService.getMemberRelatedEntitiesIds(entity.getId(), relationName,
+                            isFromMember);
                 } catch (EntitiyRelationXMLLoadingException e) {
                     logger.warn("Error getting nested entities for relation {}: {}", relationName, e.getMessage());
                     continue;
@@ -348,58 +364,60 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                         logger.warn("Nested entity not found: " + nestedRelatedEntityId);
                         continue;
                     } else {
-                        JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig, nestedEntity.get());
+                        JSONEntityElastic relatedElasticEntity = createElasticEntity(nestedEntityConfig,
+                                nestedEntity.get());
                         elasticEntity.addRelatedEntity(nestedEntityConfig.getName(), relatedElasticEntity);
                     }
                 }
             }
-            
+
             // Serializar a JSON
             return jsonMapper.writeValueAsString(elasticEntity);
-            
+
         } catch (Exception e) {
             logger.error("Error generating elastic document for entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error generating elastic document: " + entity.getId() + ". " + e.getMessage());
+            throw new EntityIndexingException(
+                    "Error generating elastic document: " + entity.getId() + ". " + e.getMessage());
         }
     }
-    
+
     /**
      * Indexa un documento directamente en Elasticsearch con retry.
      */
     private void indexDocumentInElasticsearch(String entityId, String json, String indexName) {
         // Verificar si el circuit breaker está abierto
         if (circuitBreaker.isOpen()) {
-            logger.error("[CIRCUIT BREAKER OPEN] Rejecting document {} to index '{}'. Status: {}", 
-                       entityId, indexName, circuitBreaker.getStatus());
+            logger.error("[CIRCUIT BREAKER OPEN] Rejecting document {} to index '{}'. Status: {}",
+                    entityId, indexName, circuitBreaker.getStatus());
             documentsFailedPermanently.incrementAndGet();
             return;
         }
-        
+
         boolean retry = true;
         int retries = 0;
         int millis = 1000;
-        
+
         while (retry && retries < maxRetries) {
             try {
                 IndexRequest request = new IndexRequest(indexName)
-                    .id(entityId)
-                    .source(json, XContentType.JSON);
-                    
+                        .id(entityId)
+                        .source(json, XContentType.JSON);
+
                 elasticClient.index(request, RequestOptions.DEFAULT);
-                
+
                 // Éxito - registrar y resetear circuit breaker si estaba con fallos
                 documentsIndexed.incrementAndGet();
                 circuitBreaker.recordSuccess();
                 logger.debug("Document indexed successfully: {}", entityId);
                 return;
-                
+
             } catch (IOException e) {
                 retries++;
                 circuitBreaker.recordFailure();
-                
+
                 if (retries >= maxRetries) {
-                    logger.error("Failed to index document {} after {} retries: {}", 
-                               entityId, maxRetries, e.getMessage());
+                    logger.error("Failed to index document {} after {} retries: {}",
+                            entityId, maxRetries, e.getMessage());
                     documentsFailedPermanently.incrementAndGet();
                     retry = false;
                 } else {
@@ -418,74 +436,77 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
     @Override
     public void prePage() throws EntityIndexingException {
-       }
+    }
 
     @Override
     public void index(Entity entity) throws EntityIndexingException {
         if (shutdown) {
             throw new EntityIndexingException("Indexer is shutting down");
         }
-        
-        // Solo capturar el UUID - el worker cargará la entidad completa en su propia transacción
+
+        // Solo capturar el UUID - el worker cargará la entidad completa en su propia
+        // transacción
         final UUID entityId = entity.getId();
         logger.debug("Queueing entity for async processing: {}", entityId);
-        
+
         try {
             // Adquirir permiso del semáforo antes de encolar
             concurrentTasksSemaphore.acquire();
-            logger.debug("Acquired semaphore permit for entity: {} (available: {})", 
-                        entityId, concurrentTasksSemaphore.availablePermits());
+            logger.debug("Acquired semaphore permit for entity: {} (available: {})",
+                    entityId, concurrentTasksSemaphore.availablePermits());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new EntityIndexingException("Interrupted while waiting for processing slot for entity: " + entityId);
         }
-        
+
         // Registrar este hilo en el phaser
         activeIndexingPhaser.register();
         logger.debug("Registered with phaser. Current parties: {}", activeIndexingPhaser.getRegisteredParties());
-        
+
         try {
             // Enviar solo el UUID al executor - cada worker manejará todo el proceso
             CompletableFuture.runAsync(() -> {
                 try {
                     logger.debug("Worker thread starting for entity: {}", entityId);
-                    
+
                     // El worker carga la entidad, genera JSON e indexa en Elasticsearch
                     // Todo en UNA SOLA transacción read-only garantizando lazy loading
                     processEntityInTransaction(entityId);
-                    
+
                     logger.debug("Worker thread completed for entity: {}", entityId);
-                    
+
                 } catch (Exception e) {
                     logger.error("Error in worker thread for entity {}: {}", entityId, e.getMessage(), e);
                 } finally {
                     // Liberar semáforo y desregistrar del phaser
                     concurrentTasksSemaphore.release();
                     activeIndexingPhaser.arriveAndDeregister();
-                    logger.debug("Released semaphore and deregistered from phaser for entity: {} (available: {})", 
-                                entityId, concurrentTasksSemaphore.availablePermits());
+                    logger.debug("Released semaphore and deregistered from phaser for entity: {} (available: {})",
+                            entityId, concurrentTasksSemaphore.availablePermits());
                 }
             }, indexingExecutor);
-            
+
             // El método retorna inmediatamente - el trabajo se hace en el worker thread
             logger.debug("Entity {} queued for async processing", entityId);
-            
+
         } catch (Exception e) {
             // Si hay error en el setup, liberar semáforo y desregistrar del phaser
             concurrentTasksSemaphore.release();
             activeIndexingPhaser.arriveAndDeregister();
             logger.error("Error setting up async processing for entity {}: {}", entity.getId(), e.getMessage(), e);
-            throw new EntityIndexingException("Error queueing entity for async processing: " + entity.getId() + ". " + e.getMessage());
+            throw new EntityIndexingException(
+                    "Error queueing entity for async processing: " + entity.getId() + ". " + e.getMessage());
         }
     }
 
-    private JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity) throws EntityIndexingException {
+    private JSONEntityElastic createElasticEntity(EntityIndexingConfig config, Entity entity)
+            throws EntityIndexingException {
         // create the elastic entity
         JSONEntityElastic jsonEntityElastic = new JSONEntityElastic();
         try {
             // get the entity type
             EntityType entityType = entityDataService.getEntityTypeFromId(entity.getEntityTypeId());
-        
+
             // set the id based on entity uuid
             jsonEntityElastic.setId(entity.getId().toString());
 
@@ -504,49 +525,62 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 try {
                     processFieldConfig(entity, fieldConfig, jsonEntityElastic);
                 } catch (Exception e) {
-                    throw new EntityIndexingException("Error processing field: " + fieldConfig.getName() + " :: " + e.getMessage());
+                    throw new EntityIndexingException(
+                            "Error processing field: " + fieldConfig.getName() + " :: " + e.getMessage());
                 }
 
         } catch (Exception e) {
-            throw new EntityIndexingException("Error creating JSONElasticEntity: " + config.getName() + " :: " + config.getEntityType() + " from entity: " + entity.getId() + " :: " + e.getMessage());
+            throw new EntityIndexingException("Error creating JSONElasticEntity: " + config.getName() + " :: "
+                    + config.getEntityType() + " from entity: " + entity.getId() + " :: " + e.getMessage());
         }
         return jsonEntityElastic;
     }
 
-    private void processFieldConfig(Entity entity, FieldIndexingConfig config, JSONEntityElastic ientity) throws EntityIndexingException {
+    private void processFieldConfig(Entity entity, FieldIndexingConfig config, JSONEntityElastic ientity)
+            throws EntityIndexingException {
         if (config.getSourceField() == null)
-            throw new EntityIndexingException("Error Indexing Entity Field " + config.getName() + " source field is not defined");
+            throw new EntityIndexingException(
+                    "Error Indexing Entity Field " + config.getName() + " source field is not defined");
 
         try {
             if (config.getSourceRelation() != null) { // is a relation indexing
                 if (config.getSourceMember() != null) { // is a related entity field
-                    // check if the relation is from or to the entity and get the related entities ids
-                    Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(), config.getSourceMember());
-                    for (UUID relatedEntityId : entityDataService.getMemberRelatedEntitiesIds(entity.getId(), config.getSourceRelation(), isFromMember)) {
+                    // check if the relation is from or to the entity and get the related entities
+                    // ids
+                    Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(),
+                            config.getSourceMember());
+                    for (UUID relatedEntityId : entityDataService.getMemberRelatedEntitiesIds(entity.getId(),
+                            config.getSourceRelation(), isFromMember)) {
                         Entity relatedEntity = entityDataService.getEntityById(relatedEntityId).get();
                         relatedEntity.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
-                        processFieldOccurrences(relatedEntity.getFieldOccurrences(config.getSourceField()), config, ientity);
+                        processFieldOccurrences(relatedEntity.getFieldOccurrences(config.getSourceField()), config,
+                                ientity);
                     }
                 } else { // is a relation attribute
                     EntityType entityType = entityDataService.getEntityTypeFromId(entity.getEntityTypeId());
-                    Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(), entityType.getName());
+                    Boolean isFromMember = entityModelCache.isFromRelation(config.getSourceRelation(),
+                            entityType.getName());
 
-                    for (Relation relation : entityDataService.getRelationsWithThisEntityAsMember(entity.getId(), config.getSourceRelation(), isFromMember)) {
+                    for (Relation relation : entityDataService.getRelationsWithThisEntityAsMember(entity.getId(),
+                            config.getSourceRelation(), isFromMember)) {
                         relation.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
                         processFieldOccurrences(relation.getFieldOccurrences(config.getSourceField()), config, ientity);
                     }
                 }
-            } else { // is a entity field so process we process the field occurrences of this entity only
+            } else { // is a entity field so process we process the field occurrences of this entity
+                     // only
                 entity.loadOcurrences(entityModelCache.getNamesByIdMap(FieldType.class));
                 processFieldOccurrences(entity.getFieldOccurrences(config.getSourceField()), config, ientity);
             }
         } catch (Exception e) {
             e.printStackTrace();
-            throw new EntityIndexingException("Error processing field: " + config.getSourceField() + " subfield: " + config.getSourceSubfield() + "::" + e.getMessage());
+            throw new EntityIndexingException("Error processing field: " + config.getSourceField() + " subfield: "
+                    + config.getSourceSubfield() + "::" + e.getMessage());
         }
     }
 
-    private void processFieldOccurrences(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config, JSONEntityElastic ientity) {
+    private void processFieldOccurrences(Collection<FieldOccurrence> occurrences, FieldIndexingConfig config,
+            JSONEntityElastic ientity) {
         // if there are no occurrences, return
         if (occurrences == null || occurrences.size() == 0)
             return;
@@ -580,7 +614,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 ientity.addFieldOccurrence(config.getName(), value);
 
             } catch (EntityRelationException e) {
-                logger.error("Error indexing field: " + config.getSourceField() + " subfield: " + config.getSourceSubfield() + "::" + e.getMessage());
+                logger.error("Error indexing field: " + config.getSourceField() + " subfield: "
+                        + config.getSourceSubfield() + "::" + e.getMessage());
             }
     }
 
@@ -599,20 +634,20 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 logger.warn("Interrupted while waiting for indexing threads to complete");
                 return;
             }
-            
+
             // Reportar estadísticas finales cuando todos los tasks terminan
             ProcessingStats finalStats = getProcessingStats();
             logger.info("All indexing tasks completed successfully.");
             logger.info("Final indexing statistics - Documents produced: {}, indexed: {}, failed: {}",
-                       finalStats.getDocumentsProduced(),
-                       finalStats.getDocumentsIndexed(), 
-                       finalStats.getDocumentsFailed());
-            
+                    finalStats.getDocumentsProduced(),
+                    finalStats.getDocumentsIndexed(),
+                    finalStats.getDocumentsFailed());
+
             if (finalStats.getDocumentsFailed() > 0) {
-                logger.warn("Some documents failed permanently during indexing. Failed count: {}", 
-                           finalStats.getDocumentsFailed());
+                logger.warn("Some documents failed permanently during indexing. Failed count: {}",
+                        finalStats.getDocumentsFailed());
             }
-            
+
             logger.info("Flush operation completed successfully.");
         }
     }
@@ -671,7 +706,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
     /**
      * Resetea manualmente el circuit breaker.
-     * Útil cuando se sabe que Elasticsearch se ha recuperado y se quiere reintentar.
+     * Útil cuando se sabe que Elasticsearch se ha recuperado y se quiere
+     * reintentar.
      */
     public void resetCircuitBreaker() {
         if (circuitBreaker != null) {
@@ -681,7 +717,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             logger.warn("Circuit breaker is not initialized");
         }
     }
-    
+
     /**
      * Obtener estadísticas del procesamiento actual
      */
@@ -693,10 +729,9 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 documentsFailedPermanently.get(),
                 concurrentTasksSemaphore.availablePermits(),
                 maxConcurrentTasks,
-                circuitBreaker != null ? circuitBreaker.getStatus() : "NOT INITIALIZED"
-        );
+                circuitBreaker != null ? circuitBreaker.getStatus() : "NOT INITIALIZED");
     }
-    
+
     /**
      * Imprime un reporte detallado del estado actual de indexación.
      * Útil para monitoreo manual o debugging.
@@ -725,9 +760,9 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         private final int maxSlots;
         private final String circuitBreakerStatus;
 
-        public ProcessingStats(int activeTasks, long documentsProduced, 
-                             long documentsIndexed, long documentsFailed,
-                             int availableSlots, int maxSlots, String circuitBreakerStatus) {
+        public ProcessingStats(int activeTasks, long documentsProduced,
+                long documentsIndexed, long documentsFailed,
+                int availableSlots, int maxSlots, String circuitBreakerStatus) {
             this.activeTasks = activeTasks;
             this.documentsProduced = documentsProduced;
             this.documentsIndexed = documentsIndexed;
@@ -737,14 +772,37 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             this.circuitBreakerStatus = circuitBreakerStatus;
         }
 
-        public int getActiveTasks() { return activeTasks; }
-        public long getDocumentsProduced() { return documentsProduced; }
-        public long getDocumentsIndexed() { return documentsIndexed; }
-        public long getDocumentsFailed() { return documentsFailed; }
-        public int getAvailableSlots() { return availableSlots; }
-        public int getMaxSlots() { return maxSlots; }
-        public int getUsedSlots() { return maxSlots - availableSlots; }
-        public String getCircuitBreakerStatus() { return circuitBreakerStatus; }
+        public int getActiveTasks() {
+            return activeTasks;
+        }
+
+        public long getDocumentsProduced() {
+            return documentsProduced;
+        }
+
+        public long getDocumentsIndexed() {
+            return documentsIndexed;
+        }
+
+        public long getDocumentsFailed() {
+            return documentsFailed;
+        }
+
+        public int getAvailableSlots() {
+            return availableSlots;
+        }
+
+        public int getMaxSlots() {
+            return maxSlots;
+        }
+
+        public int getUsedSlots() {
+            return maxSlots - availableSlots;
+        }
+
+        public String getCircuitBreakerStatus() {
+            return circuitBreakerStatus;
+        }
     }
 
     // --- ELASTIC SPECIFIC METHODS ---
@@ -766,9 +824,11 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
         try {
             final CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
-            credentialsProvider.setCredentials(AuthScope.ANY, new UsernamePasswordCredentials(username.trim(), password.trim()));
+            credentialsProvider.setCredentials(AuthScope.ANY,
+                    new UsernamePasswordCredentials(username.trim(), password.trim()));
 
-            final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE).build();
+            final SSLContext sslContext = SSLContexts.custom().loadTrustMaterial(null, TrustAllStrategy.INSTANCE)
+                    .build();
 
             RestClientBuilder builder = RestClient.builder(new HttpHost(host.trim(), port, useSSL ? "https" : "http"))
                     .setHttpClientConfigCallback(new RestClientBuilder.HttpClientConfigCallback() {
@@ -790,7 +850,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
 
             localClient = new RestHighLevelClient(builder);
             localClient.ping(RequestOptions.DEFAULT);
-            logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ") + (authenticate ? " using authentication" : ""));
+            logger.info("Elasticsearch/Opensearch client created: " + host + ":" + port + (useSSL ? " using SSL" : " ")
+                    + (authenticate ? " using authentication" : ""));
 
             return localClient;
 
@@ -806,7 +867,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                 createOrUpdateIndexMapping(entityIndexingConfig);
             }
         } catch (Exception e) {
-            throw new EntityIndexingException("Error when creating index mapping from file" + indexingConfigFilename + " :: " + e.getMessage());
+            throw new EntityIndexingException(
+                    "Error when creating index mapping from file" + indexingConfigFilename + " :: " + e.getMessage());
         }
     }
 
@@ -839,12 +901,15 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         addNestedEntitiesToMapping(entityIndexingConfig.getIndexNestedEntities(), typesMapping);
 
         try {
-            Boolean indexExists = elasticClient.indices().exists(new GetIndexRequest(entityIndexingConfig.getName()), RequestOptions.DEFAULT);
+            Boolean indexExists = elasticClient.indices().exists(new GetIndexRequest(entityIndexingConfig.getName()),
+                    RequestOptions.DEFAULT);
 
             if (indexExists) {
-                logger.warn("Index " + entityIndexingConfig.getName() + " already exists. Is not possible to update mapping !!!");
+                logger.warn("Index " + entityIndexingConfig.getName()
+                        + " already exists. Is not possible to update mapping !!!");
             } else {
-                logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: " + mapping.toString() + "");
+                logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: "
+                        + mapping.toString() + "");
 
                 CreateIndexRequest createIndexRequest = new CreateIndexRequest(entityIndexingConfig.getName());
                 createIndexRequest.mapping(mapping);
@@ -854,11 +919,13 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             }
 
         } catch (IOException e) {
-            throw new EntityIndexingException("Error trying index creation / mapping creation: " + entityIndexingConfig.getName() + " :: " + e.getMessage());
+            throw new EntityIndexingException("Error trying index creation / mapping creation: "
+                    + entityIndexingConfig.getName() + " :: " + e.getMessage());
         }
     }
 
-    private void addNestedEntitiesToMapping(Collection<EntityIndexingConfig> nestedEntityConfigs, HashMap<String, Object> typesMapping) {
+    private void addNestedEntitiesToMapping(Collection<EntityIndexingConfig> nestedEntityConfigs,
+            HashMap<String, Object> typesMapping) {
         nestedEntityConfigs.forEach(nestedEntityConfig -> {
             HashMap<String, Object> nestedTypesMapping = new HashMap<String, Object>();
             HashMap<String, Object> nestedMapping = new HashMap<String, Object>();
@@ -888,12 +955,12 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         private volatile boolean open = false;
         private volatile long openedAt = 0;
         private final long resetTimeoutMs;
-        
+
         public ElasticCircuitBreaker(int maxConsecutiveFailures, long resetTimeoutMs) {
             this.maxConsecutiveFailures = maxConsecutiveFailures;
             this.resetTimeoutMs = resetTimeoutMs;
         }
-        
+
         /**
          * Verifica si el circuit breaker está abierto.
          * Si ha pasado el timeout de reset, intenta cerrarlo automáticamente.
@@ -905,7 +972,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             }
             return open;
         }
-        
+
         /**
          * Registra una operación exitosa.
          * Resetea el contador de fallos y cierra el circuito si estaba abierto.
@@ -913,12 +980,12 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         public void recordSuccess() {
             int previousFailures = consecutiveFailures.getAndSet(0);
             if (open) {
-                logger.info("[CIRCUIT BREAKER] CLOSED after successful operation (was open with {} failures)", 
-                           previousFailures);
+                logger.info("[CIRCUIT BREAKER] CLOSED after successful operation (was open with {} failures)",
+                        previousFailures);
                 open = false;
             }
         }
-        
+
         /**
          * Registra un fallo en la operación.
          * Abre el circuito si se alcanza el umbral de fallos consecutivos.
@@ -927,15 +994,15 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             int failures = consecutiveFailures.incrementAndGet();
             if (failures >= maxConsecutiveFailures && !open) {
                 logger.error("[CIRCUIT BREAKER] OPENED after {} consecutive failures. " +
-                           "Elasticsearch operations will be rejected for {}ms", 
-                           failures, resetTimeoutMs);
+                        "Elasticsearch operations will be rejected for {}ms",
+                        failures, resetTimeoutMs);
                 open = true;
                 openedAt = System.currentTimeMillis();
             } else if (!open) {
                 logger.warn("[CIRCUIT BREAKER] Failure recorded ({}/{})", failures, maxConsecutiveFailures);
             }
         }
-        
+
         /**
          * Resetea el circuit breaker manualmente.
          */
@@ -944,7 +1011,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             open = false;
             logger.info("[CIRCUIT BREAKER] Manually reset");
         }
-        
+
         /**
          * Obtiene el estado actual del circuit breaker.
          */
@@ -952,11 +1019,11 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             if (open) {
                 long elapsed = System.currentTimeMillis() - openedAt;
                 long remaining = Math.max(0, resetTimeoutMs - elapsed);
-                return String.format("OPEN (failures: %d, reset in: %dms)", 
-                                    consecutiveFailures.get(), remaining);
+                return String.format("OPEN (failures: %d, reset in: %dms)",
+                        consecutiveFailures.get(), remaining);
             } else {
-                return String.format("CLOSED (failures: %d/%d)", 
-                                    consecutiveFailures.get(), maxConsecutiveFailures);
+                return String.format("CLOSED (failures: %d/%d)",
+                        consecutiveFailures.get(), maxConsecutiveFailures);
             }
         }
     }
