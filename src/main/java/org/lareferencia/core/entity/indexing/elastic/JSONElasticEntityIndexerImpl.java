@@ -463,30 +463,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 
 	private void createOrUpdateIndexMapping( EntityIndexingConfig entityIndexingConfig ) throws EntityIndexingException {
 
-		// create mapping based on entity indexing config
-		HashMap<String, Object> typesMapping = new HashMap<String, Object>();
-		HashMap<String, Object> mapping = new HashMap<String, Object>();
-		mapping.put(MAPPING_PROPERTIES_STR, typesMapping);
-
-		// add fields to mapping
-		for ( FieldIndexingConfig fieldConfig : entityIndexingConfig.getIndexFields() ) {
-			
-			// create field mapping
-			Map<String, Object> fieldMapping =  createTypeMapping( fieldConfig.getType() );
-
-			// add elastic params to mapping
-			addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
-
-			// add field mapping to type mapping
-			typesMapping.put(fieldConfig.getName(), fieldMapping);
-
-		}
-		
-		// add id field to mapping
-		typesMapping.put(ID_FIELD, createTypeMapping(ID_FIELD_TYPE));
-
-		// add nested entities to mapping
-		addNestedEntitiesToMapping(entityIndexingConfig.getIndexNestedEntities(), typesMapping);
+		ElasticEntityMappingBuilder mappingBuilder = new ElasticEntityMappingBuilder();
+		Map<String, Object> mapping = mappingBuilder.createMapping(entityIndexingConfig);
+		Map<String, Object> settings = mappingBuilder.createSettings(entityIndexingConfig);
 	
 		// check if index exists
 		try {
@@ -496,7 +475,7 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 				logger.warn("Index " + entityIndexingConfig.getName() + " already exists. Is not possible to update mapping !!!");
 
 			} else {
-				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: " + mapping.toString() + "");
+				logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: " + mapping.toString() + " and settings: " + settings.toString());
 
 				// create index
 				CreateIndexRequest createIndexRequest = new CreateIndexRequest( entityIndexingConfig.getName() );
@@ -505,6 +484,9 @@ public class JSONElasticEntityIndexerImpl implements IEntityIndexer {
 				//		.put("index.number_of_replicas", 3)
 				//);
 
+				if (!settings.isEmpty()) {
+					createIndexRequest.settings(settings);
+				}
 				createIndexRequest.mapping(mapping);
 				CreateIndexResponse createIndexResponse = elasticClient.indices().create(createIndexRequest, RequestOptions.DEFAULT);
 
