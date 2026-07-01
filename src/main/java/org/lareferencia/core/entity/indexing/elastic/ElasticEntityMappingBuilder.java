@@ -164,7 +164,7 @@ public class ElasticEntityMappingBuilder {
         try {
             return Integer.valueOf(trimmedValue);
         } catch (NumberFormatException e) {
-            return value;
+            return trimmedValue;
         }
     }
 
