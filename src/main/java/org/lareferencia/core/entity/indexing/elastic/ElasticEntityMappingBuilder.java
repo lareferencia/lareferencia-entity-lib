@@ -169,8 +169,12 @@ public class ElasticEntityMappingBuilder {
     }
 
     private void addIfPresent(Map<String, Object> target, String key, String value) {
-        if (value != null && !value.trim().isEmpty()) {
-            target.put(key, value);
+        if (value == null) {
+            return;
+        }
+        String trimmedValue = value.trim();
+        if (!trimmedValue.isEmpty()) {
+            target.put(key, trimmedValue);
         }
     }
 }
