@@ -53,6 +53,12 @@ public class EntityIndexingConfig {
 
 	private List<FieldIndexingConfig> indexFields = new LinkedList<FieldIndexingConfig>();
 	private List<EntityIndexingConfig> indexNestedEntities = new LinkedList<EntityIndexingConfig>();
+	private IndexSettingsConfig indexSettings;
+
+	@XmlElement(name="index-settings")
+	public IndexSettingsConfig getIndexSettings() {
+		return indexSettings;
+	}
 
 	@XmlElementWrapper(name="index-fields")
 	@XmlElement(name="index-field")

@@ -887,18 +887,9 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     }
 
     private void createOrUpdateIndexMapping(EntityIndexingConfig entityIndexingConfig) throws EntityIndexingException {
-        HashMap<String, Object> typesMapping = new HashMap<String, Object>();
-        HashMap<String, Object> mapping = new HashMap<String, Object>();
-        mapping.put(MAPPING_PROPERTIES_STR, typesMapping);
-
-        for (FieldIndexingConfig fieldConfig : entityIndexingConfig.getIndexFields()) {
-            Map<String, Object> fieldMapping = createTypeMapping(fieldConfig.getType());
-            addElasticParamsToMapping(fieldMapping, fieldConfig.getParams());
-            typesMapping.put(fieldConfig.getName(), fieldMapping);
-        }
-
-        typesMapping.put(ID_FIELD, createTypeMapping(ID_FIELD_TYPE));
-        addNestedEntitiesToMapping(entityIndexingConfig.getIndexNestedEntities(), typesMapping);
+        ElasticEntityMappingBuilder mappingBuilder = new ElasticEntityMappingBuilder();
+        Map<String, Object> mapping = mappingBuilder.createMapping(entityIndexingConfig);
+        Map<String, Object> settings = mappingBuilder.createSettings(entityIndexingConfig);
 
         try {
             Boolean indexExists = elasticClient.indices().exists(new GetIndexRequest(entityIndexingConfig.getName()),
@@ -909,9 +900,12 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
                         + " already exists. Is not possible to update mapping !!!");
             } else {
                 logger.info("Index " + entityIndexingConfig.getName() + " does not exist, creating it. With mapping: "
-                        + mapping.toString() + "");
+                        + mapping.toString() + " and settings: " + settings.toString());
 
                 CreateIndexRequest createIndexRequest = new CreateIndexRequest(entityIndexingConfig.getName());
+                if (!settings.isEmpty()) {
+                    createIndexRequest.settings(settings);
+                }
                 createIndexRequest.mapping(mapping);
                 elasticClient.indices().create(createIndexRequest, RequestOptions.DEFAULT);
 
