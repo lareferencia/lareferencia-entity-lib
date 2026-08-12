@@ -130,20 +130,20 @@ public class EntityPaginator implements IPaginator<Entity> {
 		
 		if ( entityType != null )
 			if ( provenanceSource != null )
-				page = entityRepository.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(false, entityType.getId(), provenanceSource, pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndDeletedAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(false, false, entityType.getId(), provenanceSource, pageable);
 			else
 				if ( lastUdate != null )
-					page = entityRepository.findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, entityType.getId(), lastUdate, pageable);
+					page = entityRepository.findDistinctEntityByDirtyAndDeletedAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, false, entityType.getId(), lastUdate, pageable);
 				else
-					page = entityRepository.findDistinctEntityByDirtyAndEntityTypeOrderByIdAsc(false, entityType, pageable);
+					page = entityRepository.findDistinctEntityByDirtyAndDeletedAndEntityTypeOrderByIdAsc(false, false, entityType, pageable);
 		else
 			if ( provenanceSource != null )
-				page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(false, provenanceSource, pageable);
+				page = entityRepository.findDistinctEntityByDirtyAndDeletedAndSourceEntities_Provenance_SourceOrderByIdAsc(false, false, provenanceSource, pageable);
 			else
 				if ( lastUdate != null )
-					page = entityRepository.findDistinctEntityByDirtyAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, lastUdate, pageable);
+					page = entityRepository.findDistinctEntityByDirtyAndDeletedAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(false, false, lastUdate, pageable);
 				else
-					page = entityRepository.findDistinctEntityByDirtyOrderByIdAsc(false, pageable);
+					page = entityRepository.findDistinctEntityByDirtyAndDeletedOrderByIdAsc(false, false, pageable);
 		
 		this.totalPages = page.getTotalPages();
 		return page;
