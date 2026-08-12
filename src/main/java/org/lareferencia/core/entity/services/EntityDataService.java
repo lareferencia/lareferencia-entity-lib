@@ -527,6 +527,14 @@ public class EntityDataService {
 			entityRepository.deleteById(entityId);
 	}
 
+	@Transactional
+	public int updateEntitiesDeleted(Collection<UUID> entityIds, boolean deleted) {
+		if (entityIds == null || entityIds.isEmpty())
+			return 0;
+
+		return entityRepository.updateDeletedByEntityIds(entityIds, deleted);
+	}
+
 	/**
 	 * Find or create final entity based on semantic identifiers.
 	 * 

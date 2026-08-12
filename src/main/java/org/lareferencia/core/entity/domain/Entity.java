@@ -97,6 +97,12 @@ public class Entity extends BaseEntity<Relation> implements ICacheableEntity<UUI
 	@Column(name = "dirty")
 	private Boolean dirty = true;
 
+	@Setter
+	@Getter
+	@JsonIgnore
+	@Column(name = "deleted", nullable = false)
+	private Boolean deleted = false;
+
 	
 
 	/**

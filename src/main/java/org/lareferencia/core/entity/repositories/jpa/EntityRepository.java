@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.time.LocalDateTime;
+import java.util.Collection;
 
 import org.lareferencia.core.entity.domain.Entity;
 import org.lareferencia.core.entity.domain.EntityType;
@@ -33,6 +34,7 @@ import org.lareferencia.core.entity.domain.RelationId;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.data.rest.core.annotation.RepositoryRestResource;
@@ -69,17 +71,17 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 
 	// Entity Paginator methods
 
-	Page<Entity> findDistinctEntityByDirtyOrderByIdAsc(Boolean dirty, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedOrderByIdAsc(Boolean dirty, Boolean deleted, Pageable pageable);
 
-	Page<Entity> findDistinctEntityByDirtyAndEntityTypeOrderByIdAsc(Boolean dirty, EntityType type, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedAndEntityTypeOrderByIdAsc(Boolean dirty, Boolean deleted, EntityType type, Pageable pageable);
 
-	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean dirty, String source, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean dirty, Boolean deleted, String source, Pageable pageable);
 
-	Page<Entity> findDistinctEntityByDirtyAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean dirty, LocalDateTime lastUpdate, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean dirty, Boolean deleted, LocalDateTime lastUpdate, Pageable pageable);
 
-	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean Dirty, Long entityTypeId, String source, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedAndEntityTypeIdAndSourceEntities_Provenance_SourceOrderByIdAsc(Boolean Dirty, Boolean deleted, Long entityTypeId, String source, Pageable pageable);
 
-	Page<Entity> findDistinctEntityByDirtyAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean Dirty, Long entityTypeId, LocalDateTime lastUpdate, Pageable pageable);
+	Page<Entity> findDistinctEntityByDirtyAndDeletedAndEntityTypeIdAndSourceEntities_Provenance_LastUpdateGreaterThanEqualOrderByIdAsc(Boolean Dirty, Boolean deleted, Long entityTypeId, LocalDateTime lastUpdate, Pageable pageable);
 
 
 	// End Entity Paginator methods
@@ -104,7 +106,8 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	// Set<Relation> getRelationsWithThisEntityAsMember(UUID id, Long relationId);
 
 	@Query("SELECT r FROM Relation r WHERE r.relationType.id = :relationTypeId AND " +
-       "(CASE WHEN :isFromMember = true THEN r.id.fromEntityId ELSE r.id.toEntityId END) = :entityId")
+	   "((:isFromMember = true AND r.id.fromEntityId = :entityId AND r.toEntity.deleted = false) OR " +
+	   "(:isFromMember = false AND r.id.toEntityId = :entityId AND r.fromEntity.deleted = false))")
 	Set<Relation> findRelationsByTypeAndEntityAndMembership(
 		@Param("relationTypeId") Long relationTypeId,
 		@Param("entityId") UUID entityId,
@@ -112,17 +115,18 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	);
 
 	@Query("SELECT r.id FROM Relation r WHERE r.relationType.id = :relationTypeId AND " +
-	"(CASE WHEN :isFromMember = true THEN r.id.fromEntityId ELSE r.id.toEntityId END) = :entityId")
+	"((:isFromMember = true AND r.id.fromEntityId = :entityId AND r.toEntity.deleted = false) OR " +
+	"(:isFromMember = false AND r.id.toEntityId = :entityId AND r.fromEntity.deleted = false))")
  	Set<RelationId> findRelationsIdsByTypeAndEntityAndMembership(
 	 @Param("relationTypeId") Long relationTypeId,
 	 @Param("entityId") UUID entityId,
 	 @Param("isFromMember") boolean isFromMember
  );
    
-	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2")
+	@Query("Select r.id.toEntityId from Relation r where r.id.fromEntityId = ?1 and r.relationType.id = ?2 and r.toEntity.deleted = false")
 	Set<UUID> getToEntitiesIdsWithThisEntityInFromMember(UUID id, Long relationId);
 
-	@Query("Select r.id.fromEntityId from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2")
+	@Query("Select r.id.fromEntityId from Relation r where r.id.toEntityId = ?1 and r.relationType.id = ?2 and r.fromEntity.deleted = false")
 	Set<UUID> getFromEntitiesIdsWithThisEntityInToMember(UUID id, Long relationId);
 
 	
@@ -151,6 +155,9 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	@Query(value = "SELECT merge_dirty_entities_and_relations();", nativeQuery = true)
 	void mergeDirtyEntitiesAndRelations();
 
+	@Modifying(clearAutomatically = true, flushAutomatically = true)
+	@Query(value = "UPDATE entity SET deleted = :deleted WHERE uuid IN (:entityIds)", nativeQuery = true)
+	int updateDeletedByEntityIds(@Param("entityIds") Collection<UUID> entityIds, @Param("deleted") boolean deleted);
 
    
 
