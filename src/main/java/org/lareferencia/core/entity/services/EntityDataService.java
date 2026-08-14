@@ -72,6 +72,7 @@ import org.lareferencia.core.entity.xml.XMLRelationInstance;
 import org.lareferencia.core.util.Profiler;
 import org.lareferencia.core.util.date.DateHelper;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Propagation;
@@ -533,6 +534,11 @@ public class EntityDataService {
 			return 0;
 
 		return entityRepository.updateDeletedByEntityIds(entityIds, deleted);
+	}
+
+	@Transactional(readOnly = true)
+	public List<UUID> getDeletedEntityIds(int page, int pageSize) {
+		return entityRepository.findDeletedEntityIds(PageRequest.of(page, pageSize));
 	}
 
 	/**
