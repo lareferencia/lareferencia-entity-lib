@@ -46,6 +46,9 @@ import org.lareferencia.core.entity.xml.XMLField;
 import org.lareferencia.core.entity.xml.XMLRelationType;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.w3c.dom.Document;
 
 @Service
@@ -59,6 +62,9 @@ public class EntityMetamodelService {
 
 	@Autowired
 	RelationTypeRepository relationTypeRepository;
+
+	@Autowired
+	EntityModelCache entityModelCache;
 
 	
 	public EntityMetamodelService() {
@@ -84,6 +90,56 @@ public class EntityMetamodelService {
 		}
 		
 		return field;
+	}
+
+	@Transactional(rollbackFor = Exception.class)
+	public EntityFieldsUpdateReport updateEntityFields(XMLEntityRelationMetamodel er) throws Exception {
+		
+		EntityFieldsUpdateReport report = new EntityFieldsUpdateReport();
+		
+		for (XMLEntityType xmlEntity : er.getEntities()) {
+			
+			EntityType entity = entityTypeRepository.findOneByName(xmlEntity.getName())
+				.orElseThrow(() -> new EntityRelationException(
+					"Cannot update entity fields: EntityType '" + xmlEntity.getName() + "' does not exist"
+				));
+			
+			report.incrementProcessedEntities();
+			
+			for ( XMLField xmlField : xmlEntity.getFields() ) {
+				
+				if ( entity.getFieldNames().contains(xmlField.getName()) ) {
+					report.incrementIgnoredFields();
+					continue;
+				}
+				
+				FieldType field = XmlEntityField2EntityField(xmlField);
+				entity.addField(field);
+				report.incrementAddedFields();
+			}
+			
+			entityTypeRepository.save(entity);
+		}
+		
+		invalidateEntityModelCacheAfterCommit();
+		
+		return report;
+	}
+
+	private void invalidateEntityModelCacheAfterCommit() {
+		
+		if ( TransactionSynchronizationManager.isSynchronizationActive() ) {
+			TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+				
+				@Override
+				public void afterCommit() {
+					entityModelCache.invalidate();
+				}
+			});
+		}
+		else {
+			entityModelCache.invalidate();
+		}
 	}
 	
 	/**

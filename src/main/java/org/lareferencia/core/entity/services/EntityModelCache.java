@@ -47,6 +47,28 @@ public class EntityModelCache {
     private volatile boolean initialized = false;
     private final Object initLock = new Object();
 
+    public void invalidate() {
+        synchronized (initLock) {
+            initialized = false;
+
+            if (byNameMapsByClass != null) {
+                byNameMapsByClass.clear();
+            }
+
+            if (byIdMapsByClass != null) {
+                byIdMapsByClass.clear();
+            }
+
+            if (namesByIdMapsByClass != null) {
+                namesByIdMapsByClass.clear();
+            }
+
+            if (isFromRelationMap != null) {
+                isFromRelationMap.clear();
+            }
+        }
+    }
+
     /**
      * Lazy initialization of the cache.
      * This method is called automatically on first access.
