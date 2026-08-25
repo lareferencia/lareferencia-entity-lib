@@ -21,6 +21,7 @@
 package org.lareferencia.core.entity.services;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -86,6 +87,7 @@ import lombok.Setter;
 public class EntityDataService {
 
 	private static Logger logger = LogManager.getLogger(EntityDataService.class);
+	private static final int UPDATE_DELETED_BATCH_SIZE = 10_000;
 
 	@Autowired
 	EntityTypeRepository entityTypeRepository;
@@ -533,7 +535,20 @@ public class EntityDataService {
 		if (entityIds == null || entityIds.isEmpty())
 			return 0;
 
-		return entityRepository.updateDeletedByEntityIds(entityIds, deleted);
+		List<UUID> ids = new ArrayList<>(entityIds);
+		int totalUpdated = 0;
+
+		for (int start = 0; start < ids.size(); start += UPDATE_DELETED_BATCH_SIZE) {
+			int end = Math.min(start + UPDATE_DELETED_BATCH_SIZE, ids.size());
+			List<UUID> batch = ids.subList(start, end);
+			totalUpdated += entityRepository.updateDeletedByEntityIds(batch, deleted);
+
+			logger.info("Updated deleted={} for entity batch {}/{} ({} ids)",
+					deleted, (start / UPDATE_DELETED_BATCH_SIZE) + 1,
+					(int) Math.ceil((double) ids.size() / UPDATE_DELETED_BATCH_SIZE), batch.size());
+		}
+
+		return totalUpdated;
 	}
 
 	@Transactional(readOnly = true)
