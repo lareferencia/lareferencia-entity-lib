@@ -552,8 +552,8 @@ public class EntityDataService {
 	}
 
 	@Transactional(readOnly = true)
-	public List<UUID> getDeletedEntityIds(int page, int pageSize) {
-		return entityRepository.findDeletedEntityIds(PageRequest.of(page, pageSize));
+	public List<UUID> getDeletedEntityIds(String entityTypeName, int page, int pageSize) {
+		return entityRepository.findDeletedEntityIdsByEntityTypeName(entityTypeName, PageRequest.of(page, pageSize));
 	}
 
 	/**

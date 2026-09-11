@@ -89,6 +89,9 @@ public interface EntityRepository extends JpaRepository<Entity, UUID> {
 	@Query("select e.id from Entity e where e.deleted = true order by e.id")
 	List<UUID> findDeletedEntityIds(Pageable pageable);
 
+	@Query("select e.id from Entity e where e.deleted = true and e.entityType.name = :entityTypeName order by e.id")
+	List<UUID> findDeletedEntityIdsByEntityTypeName(@Param("entityTypeName") String entityTypeName, Pageable pageable);
+
 	// @Query("Select r.fromEntity from Relation r where r.id.toEntityId = ?1 and r.id.relationTypeId = ?2")
 	// Page<Entity> findRelatedFromEntitesByRelationTypeId(UUID entityId, Long relationTypeId, Pageable pageable);
 
