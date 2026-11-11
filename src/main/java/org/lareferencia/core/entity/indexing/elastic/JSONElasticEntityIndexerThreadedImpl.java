@@ -133,6 +133,9 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     @Value("${elastic.indexer.circuit.breaker.reset.timeout.ms:60000}")
     private long circuitBreakerResetTimeoutMs;
 
+    @Value("${elastic.indexer.transaction.timeout.seconds:120}")
+    private int transactionTimeoutSeconds;
+
     @Value("${elastic.indexer.max.concurrent.tasks:0}")
     private int maxConcurrentTasksConfig; // 0 = auto-calculate
 
@@ -263,8 +266,8 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
         // independiente
         def.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
 
-        // Timeout de 30 segundos para detectar problemas
-        def.setTimeout(30);
+        // Entidades con muchas relaciones (p.ej. Journal) pueden superar 30s
+        def.setTimeout(transactionTimeoutSeconds);
 
         TransactionStatus status = transactionManager.getTransaction(def);
         logger.debug("Read-only transaction started for entity: {}", entityId);
