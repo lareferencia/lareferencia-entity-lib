@@ -133,7 +133,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
     @Value("${elastic.indexer.circuit.breaker.reset.timeout.ms:60000}")
     private long circuitBreakerResetTimeoutMs;
 
-    @Value("${elastic.indexer.transaction.timeout.seconds:120}")
+    @Value("${elastic.indexer.transaction.timeout.seconds:60}")
     private int transactionTimeoutSeconds;
 
     @Value("${elastic.indexer.max.concurrent.tasks:0}")
@@ -632,7 +632,7 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             int phase = activeIndexingPhaser.arrive();
             try {
                 // Las tareas activas están acotadas por el timeout de la transacción más el envío a Elasticsearch
-                activeIndexingPhaser.awaitAdvanceInterruptibly(phase, transactionTimeoutSeconds + 60L,
+                activeIndexingPhaser.awaitAdvanceInterruptibly(phase, transactionTimeoutSeconds + 30,
                         TimeUnit.SECONDS);
             } catch (TimeoutException e) {
                 logger.error("Timed out waiting for indexing threads to complete; some documents may be missing");
