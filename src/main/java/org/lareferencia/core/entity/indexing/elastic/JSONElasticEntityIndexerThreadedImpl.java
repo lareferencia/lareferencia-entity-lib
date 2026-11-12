@@ -631,8 +631,13 @@ public class JSONElasticEntityIndexerThreadedImpl implements IEntityIndexer, Clo
             logger.info("Waiting for active indexing threads to complete...");
             int phase = activeIndexingPhaser.arrive();
             try {
-                activeIndexingPhaser.awaitAdvanceInterruptibly(phase, 30, TimeUnit.SECONDS);
-            } catch (InterruptedException | TimeoutException e) {
+                // Las tareas activas están acotadas por el timeout de la transacción más el envío a Elasticsearch
+                activeIndexingPhaser.awaitAdvanceInterruptibly(phase, transactionTimeoutSeconds + 60L,
+                        TimeUnit.SECONDS);
+            } catch (TimeoutException e) {
+                logger.error("Timed out waiting for indexing threads to complete; some documents may be missing");
+                return;
+            } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 logger.warn("Interrupted while waiting for indexing threads to complete");
                 return;
